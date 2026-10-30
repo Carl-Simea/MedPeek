@@ -11,6 +11,9 @@ import io
 from dataclasses import dataclass
 
 from PIL import Image, ImageOps, UnidentifiedImageError
+from PIL import ImageFile
+
+ImageFile.LOAD_TRUNCATED_IMAGES = True  # read slightly cut-off JPEGs (common from portals and phones)
 
 Image.MAX_IMAGE_PIXELS = 80_000_000  # refuse decompression bombs
 

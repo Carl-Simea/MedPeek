@@ -63,12 +63,17 @@ def status() -> dict:
 def analyze(user_prompt: str, images_b64: list[str]) -> tuple[dict, dict]:
     """Send the prompt + images to Gemma 4. Returns (parsed_json, info about the run)."""
     if engine() == "google":
-        try:
-            return _google(user_prompt, images_b64)
-        except (GemmaUnavailable, GemmaBadOutput) as exc:
-            if not settings.fallback_to_local:
-                raise
-            log.warning("Hosted Gemma 4 failed (%s). Falling back to the local copy.", exc)
+        models = [m for m in dict.fromkeys([settings.google_model, settings.google_backup_model]) if m]
+        last_error: Exception | None = None
+        for model in models:
+            try:
+                return _google(user_prompt, images_b64, model)
+            except (GemmaUnavailable, GemmaBadOutput) as exc:
+                last_error = exc
+                log.warning("Hosted Gemma 4 (%s) failed: %s", model, exc)
+        if not settings.fallback_to_local and last_error:
+            raise last_error
+        log.warning("All hosted Gemma 4 models failed. Falling back to the local copy.")
     return _ollama(user_prompt, images_b64)
 
 
@@ -87,7 +92,7 @@ def _parse_json(text: str) -> dict:
     return parsed
 
 
-def _google(user_prompt: str, images_b64: list[str]) -> tuple[dict, dict]:
+def _google(user_prompt: str, images_b64: list[str], model: str) -> tuple[dict, dict]:
     if not settings.google_api_key:
         raise GemmaUnavailable("No Google AI Studio API key is set (GEMINI_API_KEY).")
     schema = json.dumps(OUTPUT_SCHEMA, separators=(",", ":"))
@@ -102,13 +107,14 @@ def _google(user_prompt: str, images_b64: list[str]) -> tuple[dict, dict]:
         "contents": [{"role": "user", "parts": parts}],
         "generationConfig": {"temperature": 0.2, "maxOutputTokens": 2048, "thinkingConfig": {"thinkingLevel": "minimal"}},
     }
-    url = GOOGLE_URL.format(model=settings.google_model)
+    url = GOOGLE_URL.format(model=model)
     headers = {"x-goog-api-key": settings.google_api_key}
 
     started = time.monotonic()
     r = _post(url, body, headers)
-    if r.status_code == 400 and "thinking" in r.text.lower():
-        body["generationConfig"].pop("thinkingConfig", None)  # older API versions don't know this field
+    if r.status_code == 400:
+        log.warning("Google AI Studio said 400 (%s); retrying without the thinking setting.", r.text[:200])
+        body["generationConfig"].pop("thinkingConfig", None)  # some model versions don't accept this field
         r = _post(url, body, headers)
     if r.status_code >= 400:
         raise GemmaUnavailable(f"Google AI Studio error {r.status_code}: {r.text[:300]}")
@@ -125,7 +131,7 @@ def _google(user_prompt: str, images_b64: list[str]) -> tuple[dict, dict]:
     usage = data.get("usageMetadata") or {}
     return parsed, {
         "engine": "google",
-        "model": settings.google_model,
+        "model": model,
         "seconds": round(time.monotonic() - started, 1),
         "prompt_tokens": usage.get("promptTokenCount"),
         "output_tokens": usage.get("candidatesTokenCount"),

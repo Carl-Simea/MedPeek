@@ -53,6 +53,8 @@ class Settings:
         default_factory=lambda: (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip()
     )
     google_model: str = field(default_factory=lambda: os.environ.get("GOOGLE_GEMMA_MODEL", "gemma-4-26b-a4b-it"))
+    # Tried next if the first hosted model is busy ("high demand"), before falling back to the local copy.
+    google_backup_model: str = field(default_factory=lambda: os.environ.get("GOOGLE_GEMMA_BACKUP_MODEL", "gemma-4-31b-it"))
     google_timeout: float = field(default_factory=lambda: float(os.environ.get("GOOGLE_TIMEOUT", "90")))
     fallback_to_local: bool = field(default_factory=lambda: _bool("FALLBACK_TO_LOCAL", True))
     # Abuse protection now that the API can be public.
