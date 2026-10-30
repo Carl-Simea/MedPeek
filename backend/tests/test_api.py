@@ -226,3 +226,14 @@ def test_referral_wording_uses_the_right_article():
     out = finalize(_raw(urgency="emergency", condition_in_reference_data=False), body_part="chest_adult", modality="xray",
                    references_used=2)
     assert "go to the emergency department" in out["confidence_reason"]
+
+
+def test_try_page_is_served():
+    r = client.get("/try")
+    assert r.status_code == 200 and "X-ray Reader" in r.text and "/api/analyze" in r.text
+
+
+def test_samples_endpoint_is_safe():
+    assert client.get("/api/samples").status_code == 200
+    assert client.get("/api/samples/..%2F..%2Fapp%2Fmain.py").status_code == 404
+    assert client.get("/api/samples/nope.jpg").status_code == 404

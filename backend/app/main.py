@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import json
+from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import gemma
@@ -174,10 +176,42 @@ def reload_references(x_admin_token: Optional[str] = Header(None)) -> dict:
     return {"total": len(library.cases)}
 
 
+TRY_PAGE = Path(__file__).resolve().parent / "static" / "try.html"
+SAMPLES_DIR = settings.reference_dir.parent / "samples"
+SAMPLE_TYPES = {".jpg", ".jpeg", ".png"}
+
+
+@app.get("/api/samples", tags=["status"])
+def samples() -> list[dict]:
+    """Example X-rays for trying the app: held-out images from the open datasets (not in the library)."""
+    manifest = SAMPLES_DIR / "samples.json"
+    if not manifest.exists():
+        return []
+    try:
+        items = json.loads(manifest.read_text())
+    except ValueError:
+        return []
+    return [i for i in items if isinstance(i, dict) and (SAMPLES_DIR / str(i.get("file", ""))).is_file()]
+
+
+@app.get("/api/samples/{name}", include_in_schema=False)
+def sample_file(name: str) -> FileResponse:
+    path = (SAMPLES_DIR / name).resolve()
+    if path.parent != SAMPLES_DIR.resolve() or path.suffix.lower() not in SAMPLE_TYPES or not path.is_file():
+        raise HTTPException(404, "No such sample.")
+    return FileResponse(path)
+
+
+@app.get("/try", include_in_schema=False)
+def try_page() -> FileResponse:
+    """A simple page for trying the API in a browser (not the team's frontend)."""
+    return FileResponse(TRY_PAGE, media_type="text/html")
+
+
 if settings.frontend_dir:
     app.mount("/", StaticFiles(directory=settings.frontend_dir, html=True), name="frontend")
 else:
 
     @app.get("/", include_in_schema=False)
     def root() -> dict:
-        return {"service": "Hacktober-Fest X-ray API", "docs": "/docs", "health": "/api/health"}
+        return {"service": "Hacktober-Fest X-ray API", "try_it": "/try", "docs": "/docs", "health": "/api/health"}

@@ -24,7 +24,12 @@ bash ~/start-gemma.sh        # starts Ollama + Gemma 4 (runs automatically in ne
 cd backend && ./run.sh       # API on port 8000
 ```
 
-Open the forwarded port 8000 (Ports tab) and go to `/docs` to try every endpoint.
+Open the forwarded port 8000 (Ports tab):
+- `/try` is a simple test page: upload an X-ray (or click a sample) and see the full answer. It's for testing, not the team's frontend.
+- `/docs` lets you try every endpoint.
+
+Sample X-rays for `/try` (held-out images that are not in the reference library):
+`.venv/bin/python scripts/make_samples.py` (after building the library). `GET /api/samples` lists them.
 
 **Frontend team, no Gemma needed:** `MOCK_GEMMA=1 ./run.sh` returns a realistic fake answer in 2 seconds.
 

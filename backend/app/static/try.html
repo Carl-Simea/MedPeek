@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>X-ray Reader Test</title>
+<style>
+  :root {
+    --bg: #f5f7fa; --card: #ffffff; --text: #17202a; --muted: #5d6b7a; --line: #dde3ea;
+    --accent: #1f6feb; --accent-ink: #ffffff; --good: #1a7f37; --warn: #9a6700; --bad: #cf222e;
+    --good-bg: #e6f4ea; --warn-bg: #fff4d6; --bad-bg: #fdecec; --chip: #eef2f7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1419; --card: #182028; --text: #e6edf3; --muted: #9aa7b4; --line: #2b3642;
+      --accent: #4c8dff; --accent-ink: #0b1220; --good: #56d364; --warn: #e3b341; --bad: #ff7b72;
+      --good-bg: #12261a; --warn-bg: #2b2412; --bad-bg: #2d1517; --chip: #222c37;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  h2 { font-size: 1.05rem; margin: 0 0 10px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px; margin-bottom: 16px; }
+  label { display: block; font-weight: 600; margin: 12px 0 6px; }
+  select, textarea, input[type=file] { width: 100%; font: inherit; color: inherit; background: var(--bg);
+         border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+  textarea { min-height: 70px; resize: vertical; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 600px) { .row { grid-template-columns: 1fr; } }
+  button { margin-top: 16px; width: 100%; padding: 12px; font: inherit; font-weight: 700; border: 0; border-radius: 8px;
+           background: var(--accent); color: var(--accent-ink); cursor: pointer; }
+  button:disabled { opacity: .55; cursor: wait; }
+  .preview { margin-top: 10px; max-height: 260px; max-width: 100%; border-radius: 8px; display: none; }
+  .bar { height: 6px; background: var(--chip); border-radius: 99px; overflow: hidden; margin: 12px 0 6px; }
+  .bar > div { height: 100%; width: 0; background: var(--accent); transition: width 1s linear; }
+  .muted { color: var(--muted); }
+  .banner { border-radius: 10px; padding: 12px 14px; margin-bottom: 16px; font-weight: 600; }
+  .banner.bad { background: var(--bad-bg); color: var(--bad); }
+  .banner.warn { background: var(--warn-bg); color: var(--warn); }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 99px; font-size: .85rem; font-weight: 700; background: var(--chip); }
+  .badge.high { background: var(--good-bg); color: var(--good); }
+  .badge.moderate { background: var(--warn-bg); color: var(--warn); }
+  .badge.low, .badge.none { background: var(--bad-bg); color: var(--bad); }
+  .referral { border-left: 4px solid var(--accent); }
+  .referral .who { font-size: 1.2rem; font-weight: 700; }
+  ul { margin: 6px 0 0; padding-left: 20px; }
+  li { margin: 4px 0; }
+  .finding { padding: 10px 0; border-top: 1px solid var(--line); }
+  .finding:first-child { border-top: 0; padding-top: 0; }
+  .meta { font-size: .85rem; color: var(--muted); }
+  .error { background: var(--bad-bg); color: var(--bad); border-radius: 10px; padding: 12px 14px; margin-bottom: 16px; }
+  .hidden { display: none; }
+  .samples { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 10px; }
+  .samples button { margin: 0; width: auto; padding: 8px 12px; font-weight: 600; background: var(--chip);
+                    color: var(--text); border: 1px solid var(--line); }
+  .or { margin: 12px 0 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>X-ray Reader</h1>
+  <p class="sub">Backend test page: Gemma 4 reads the image and checks it against our verified reference cases.</p>
+
+  <form id="form" class="card">
+    <div id="samplebox" class="hidden">
+      <label>Try a sample X-ray</label>
+      <div id="samples" class="samples"></div>
+      <p class="muted or">or upload your own:</p>
+    </div>
+    <label for="image">X-ray, MRI or CT image (JPG, PNG or DICOM)</label>
+    <input id="image" type="file" accept="image/*,.dcm,.dicom">
+    <img id="preview" class="preview" alt="Selected image preview">
+    <p id="credit" class="meta"></p>
+    <div class="row">
+      <div>
+        <label for="body_part">Body part</label>
+        <select id="body_part" required><option value="">Loading...</option></select>
+      </div>
+      <div>
+        <label for="modality">Imaging type</label>
+        <select id="modality"><option value="xray">X-ray</option></select>
+      </div>
+    </div>
+    <label for="question">Your question (optional)</label>
+    <textarea id="question" placeholder="Example: I fell on my wrist and it hurts. Is it broken?"></textarea>
+    <button id="go" type="submit">Analyze image</button>
+  </form>
+
+  <div id="error" class="error hidden"></div>
+
+  <section id="progress" class="card hidden">
+    <h2 id="status">Sending your image...</h2>
+    <div class="bar"><div id="barfill"></div></div>
+    <p class="muted" id="statusnote">Gemma 4 runs on a small cloud computer, so an answer takes about 4 minutes.</p>
+  </section>
+
+  <section id="result" class="hidden"></section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const EXPECTED_SECONDS = 240;
+let selectedFile = null;
+
+function el(tag, cls, text) {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text !== undefined && text !== null) node.textContent = text;
+  return node;
+}
+
+function card(title) {
+  const c = el("section", "card");
+  if (title) c.append(el("h2", null, title));
+  return c;
+}
+
+function list(items) {
+  const ul = el("ul");
+  (items || []).forEach((t) => ul.append(el("li", null, t)));
+  return ul;
+}
+
+function showError(message) {
+  const box = $("error");
+  box.textContent = message;
+  box.classList.remove("hidden");
+}
+
+async function loadOptions() {
+  try {
+    const opts = await (await fetch("/api/options")).json();
+    const bp = $("body_part");
+    bp.innerHTML = "";
+    bp.append(new Option("Choose a body part", ""));
+    opts.body_parts.forEach((b) => {
+      const note = b.reference_cases ? ` (${b.reference_cases} verified cases)` : " (no verified cases yet)";
+      bp.append(new Option(b.label + note, b.id));
+    });
+    const mod = $("modality");
+    mod.innerHTML = "";
+    opts.modalities.forEach((m) => mod.append(new Option(m.label, m.id)));
+  } catch (e) {
+    showError("Couldn't reach the backend. Is the API running on port 8000?");
+  }
+}
+
+function showPreview(file) {
+  const img = $("preview");
+  if (file && file.type.startsWith("image/")) {
+    img.src = URL.createObjectURL(file);
+    img.style.display = "block";
+  } else {
+    img.style.display = "none";
+  }
+}
+
+$("image").addEventListener("change", () => {
+  selectedFile = $("image").files[0] || null;
+  $("credit").textContent = "";
+  showPreview(selectedFile);
+});
+
+async function loadSamples() {
+  try {
+    const items = await (await fetch("/api/samples")).json();
+    if (!items.length) return;
+    items.forEach((s) => {
+      const b = el("button", null, s.title);
+      b.type = "button";
+      b.addEventListener("click", async () => {
+        const blob = await (await fetch(`/api/samples/${encodeURIComponent(s.file)}`)).blob();
+        selectedFile = new File([blob], s.file, { type: blob.type || "image/jpeg" });
+        $("image").value = "";
+        showPreview(selectedFile);
+        $("credit").textContent = `Sample image: ${s.credit}. It is not in our reference library.`;
+        $("body_part").value = s.body_part;
+        $("question").value = s.question;
+      });
+      $("samples").append(b);
+    });
+    $("samplebox").classList.remove("hidden");
+  } catch (e) { /* samples are optional */ }
+}
+
+function renderResult(r) {
+  const out = $("result");
+  out.innerHTML = "";
+
+  if (r.urgency_notice) {
+    out.append(el("div", "banner " + (r.urgency === "emergency" ? "bad" : "warn"), r.urgency_notice));
+  }
+
+  const summary = card("What the image shows");
+  summary.append(el("p", null, r.summary));
+  const conf = el("p");
+  conf.append(el("strong", null, "Confidence: "));
+  if (r.overall_confidence) {
+    conf.append(el("span", "badge " + r.overall_confidence, r.overall_confidence));
+  } else {
+    conf.append(el("span", "badge none", "not given"));
+  }
+  summary.append(conf);
+  summary.append(el("p", "muted", r.confidence_reason));
+  out.append(summary);
+
+  const ref = r.referral || {};
+  const referral = card("Who to see");
+  referral.classList.add("referral");
+  referral.append(el("div", "who", ref.specialist));
+  referral.append(el("p", null, ref.reason));
+  referral.append(el("p", "meta", "When: " + ref.timeframe + (ref.required ? " · Recommended" : "")));
+  out.append(referral);
+
+  if ((r.findings || []).length) {
+    const f = card("Findings");
+    r.findings.forEach((x) => {
+      const row = el("div", "finding");
+      const head = el("div");
+      head.append(el("strong", null, x.finding + " "));
+      head.append(el("span", "badge " + (x.confidence || "none"), x.confidence || "not covered by our data"));
+      row.append(head);
+      if (x.location) row.append(el("div", "meta", x.location));
+      if (x.explanation) row.append(el("div", null, x.explanation));
+      f.append(row);
+    });
+    out.append(f);
+  }
+
+  if ((r.next_steps || []).length) {
+    const s = card("Next steps");
+    s.append(list(r.next_steps));
+    out.append(s);
+  }
+  if ((r.questions_for_doctor || []).length) {
+    const q = card("Questions to ask your doctor");
+    q.append(list(r.questions_for_doctor));
+    out.append(q);
+  }
+
+  const cmp = card("Compared with verified cases");
+  if ((r.references_used || []).length) {
+    cmp.append(list(r.references_used.map((c) =>
+      `${c.label === "normal" ? "Normal case" : "Abnormal case"}${c.diagnosis ? ": " + c.diagnosis : ""} (${c.source})`)));
+    if (r.reference_comparison) cmp.append(el("p", null, r.reference_comparison));
+  } else {
+    cmp.append(el("p", null, "No verified cases exist for this body part and imaging type yet."));
+  }
+  cmp.append(el("p", "meta",
+    `Our library has ${r.reference_library_size} verified cases for ${r.body_part_label.toLowerCase()}.`));
+  out.append(cmp);
+
+  const fine = card();
+  if ((r.safety_notes || []).length) fine.append(list(r.safety_notes));
+  fine.append(el("p", "muted", r.disclaimer));
+  fine.append(el("p", "meta", `${r.model}${r.mock ? " (mock mode)" : ""} · ${r.processing_seconds} s`));
+  out.append(fine);
+
+  out.classList.remove("hidden");
+  out.scrollIntoView({ behavior: "smooth" });
+}
+
+$("form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  $("error").classList.add("hidden");
+  $("result").classList.add("hidden");
+  const file = selectedFile;
+  if (!file) return showError("Choose a sample or upload an image first.");
+  if (!$("body_part").value) return showError("Choose the body part.");
+
+  const form = new FormData();
+  form.append("image", file);
+  form.append("body_part", $("body_part").value);
+  form.append("modality", $("modality").value);
+  form.append("question", $("question").value);
+
+  $("go").disabled = true;
+  $("progress").classList.remove("hidden");
+  $("status").textContent = "Sending your image...";
+  $("barfill").style.width = "0%";
+  const started = Date.now();
+
+  try {
+    const res = await fetch("/api/analyze", { method: "POST", body: form });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const detail = Array.isArray(body.detail) ? body.detail.map((d) => d.msg).join("; ") : body.detail;
+      throw new Error(detail || `Upload failed (${res.status})`);
+    }
+    while (true) {
+      await new Promise((r) => setTimeout(r, 4000));
+      const job = await (await fetch(`/api/jobs/${body.job_id}`)).json();
+      const secs = Math.round((Date.now() - started) / 1000);
+      $("barfill").style.width = Math.min(95, (secs / EXPECTED_SECONDS) * 100) + "%";
+      if (job.status === "queued") {
+        $("status").textContent = `Waiting in line (position ${job.position_in_queue || 1})... ${secs}s`;
+      } else if (job.status === "running") {
+        $("status").textContent = `Gemma 4 is reading your image and comparing it with verified cases... ${secs}s`;
+      } else if (job.status === "done") {
+        $("barfill").style.width = "100%";
+        $("progress").classList.add("hidden");
+        renderResult(job.result);
+        break;
+      } else {
+        throw new Error(job.error || "Something went wrong.");
+      }
+    }
+  } catch (e) {
+    $("progress").classList.add("hidden");
+    showError(e.message);
+  } finally {
+    $("go").disabled = false;
+  }
+});
+
+loadOptions().then(loadSamples);
+</script>
+</body>
+</html>
