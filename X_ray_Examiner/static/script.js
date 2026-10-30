@@ -19,7 +19,6 @@ if(form){
  function showError(e){error.textContent=e.message;}
  async function load(){if(!chatId||loading)return;loading=true;try{const c=await api('/api/chats/'+encodeURIComponent(chatId));document.querySelector('#image-count').textContent=c.image_count+'/20 images';const sig=JSON.stringify(c.messages);if(sig!==signature){const nearBottom=windowEl.scrollHeight-windowEl.scrollTop-windowEl.clientHeight<100;signature=sig;messages.replaceChildren();if(c.messages.length)document.querySelector('#welcome')?.remove();const pendingNow=new Set();c.messages.forEach((m,i)=>{const b=bubble(m.role,m.text);const key=chatId+':'+i;if(m.result&&pendingBefore.has(key)&&!finalizing.has(key)){finalizing.set(key,Date.now()+1200);setTimeout(()=>{signature='';load().catch(showError);},1300);}if(m.result&&finalizing.has(key)&&Date.now()<finalizing.get(key)){b.el.classList.add('pending');b.content.replaceChildren(thinkingNode('Putting your report together.','Finalizing'));}else if(m.result)renderAnalysis(b.content,m.result,m.text);if(['sending','queued','running'].includes(m.status)){pendingNow.add(key);b.el.classList.add('pending');b.content.replaceChildren(thinkingNode(m.status==='sending'?'Sending your image…':'Gemma 4 is reading your image. This chat is saved; you can return later.'));}if(m.status==='error')b.el.classList.add('error');});pendingBefore=pendingNow;if(!pendingNow.size&&!busy)mpRunStart=null;if(nearBottom)windowEl.scrollTop=windowEl.scrollHeight;}await list();}finally{loading=false;}}
  async function ensureChat(){if(!chatId){const c=await api('/api/chats',{method:'POST'});chatId=c.id;history.replaceState(null,'','/results?chat='+chatId);}}
- document.querySelectorAll('[data-prompt]').forEach(button=>button.onclick=()=>{input.value=button.dataset.prompt;input.focus();input.dispatchEvent(new Event('input'));});
  document.querySelector('#attach').onclick=()=>files.click();
  files.onchange=()=>document.querySelector('#file-selection-text').textContent=Array.from(files.files).map(f=>f.name).join(' · ');
  input.oninput=()=>{input.style.height='auto';input.style.height=input.scrollHeight+'px';};
@@ -68,7 +67,20 @@ function renderAnalysis(container, result, fallback) {
  const no=add(row,'button','No, thanks');no.type='button';
  ask.append(row);container.append(ask);
  no.onclick=()=>ask.replaceChildren(Object.assign(document.createElement('p'),{textContent:'No problem. You can use "Report a problem" at the top if anything looks wrong.'}));
- yes.onclick=async()=>{yes.disabled=true;yes.textContent='Making your PDF…';try{const r=await fetch('/api/report-pdf',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify(result)});if(!r.ok){let msg='The PDF could not be made.';try{msg=(await r.json()).error||msg;}catch{}throw Error(msg);}const url=URL.createObjectURL(await r.blob());const a=document.createElement('a');a.href=url;a.download='MedPeek-report-'+(result.id||'report')+'.pdf';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),5000);yes.textContent='PDF downloaded';}catch(e){yes.disabled=false;yes.textContent='Yes, download the PDF';const err=ask.querySelector('.mp-note')||add(ask,'p','','mp-note');err.textContent=e.message;}};
+ yes.onclick=async()=>{
+  yes.disabled=true;yes.textContent='Preparing PDF…';
+  const status=ask.querySelector('.mp-note')||add(ask,'p','','mp-note');status.setAttribute('role','status');status.textContent='';
+  try{
+   const r=await fetch('/api/report-pdf',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify(result),signal:AbortSignal.timeout(75000)});
+   if(!r.ok){let msg=r.status===404?'The PDF download route is not running. Restart the MedPeek app after pulling updates.':'The PDF could not be made.';try{msg=(await r.json()).error||msg;}catch{}throw Error(msg);}
+   if(!(r.headers.get('Content-Type')||'').includes('application/pdf'))throw Error('An unexpected response was returned. Sign in again if your session expired.');
+   const blob=await r.blob();if(await blob.slice(0,5).text()!=='%PDF-')throw Error('The downloaded file was not a valid PDF. Please retry.');
+   const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='MedPeek-report-'+String(result.id||'report').replace(/[^A-Za-z0-9_-]/g,'').slice(0,40)+'.pdf';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
+   status.textContent='Download started. Check your browser downloads.';
+  }catch(e){status.textContent=e.name==='TimeoutError'?'The download timed out. Please try again.':e.message;}
+  finally{yes.disabled=false;yes.textContent='Download PDF';}
+ };
+
 }
 
 // "Report a problem": a mistake in a report, a bug, or any other issue.

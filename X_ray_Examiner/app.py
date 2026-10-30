@@ -1,5 +1,6 @@
 import os
 import secrets
+import re
 import requests
 from flask import Flask, render_template, request, session, jsonify, Response
 from services import history
@@ -77,11 +78,16 @@ def report_pdf():
     try:
         response = requests.post(api_url() + '/api/report/pdf', json=result, headers=HEADERS, timeout=(10, 60))
         response.raise_for_status()
+    except requests.Timeout:
+        return jsonify(error='The PDF service took too long. Please try downloading again.'), 504
     except requests.RequestException:
-        return jsonify(error='The PDF could not be made right now. Please try again.'), 502
-    name = 'MedPeek-report-%s.pdf' % str(result.get('id', 'report'))[:40]
+        return jsonify(error='The PDF service is unavailable. Please try again shortly.'), 502
+    if 'application/pdf' not in response.headers.get('Content-Type', '').lower() or not response.content.startswith(b'%PDF-'):
+        return jsonify(error='The backend returned an invalid PDF. Please check the backend connection.'), 502
+    report_id = re.sub(r'[^A-Za-z0-9_-]', '', str(result.get('id', 'report')))[:40] or 'report'
     return Response(response.content, mimetype='application/pdf',
-                    headers={'Content-Disposition': 'attachment; filename="%s"' % name})
+                    headers={'Content-Disposition': f'attachment; filename="MedPeek-report-{report_id}.pdf"'})
+
 
 
 @app.post('/api/report-issue')
