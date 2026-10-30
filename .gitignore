@@ -1,0 +1,21 @@
+# Patient data never goes to GitHub (this repo is public)
+backend/data/
+data/
+datasets/
+*.dcm
+*.dicom
+
+# Secrets and local settings
+.env
+backend/.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Node (frontend)
+node_modules/
+dist/
+.DS_Store
