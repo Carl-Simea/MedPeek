@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Analysis Chat - X Ray Examiner</title>
+        
+        <script>
+            const savedTheme = localStorage.getItem('theme') || 'light';
+            document.documentElement.setAttribute('data-bs-theme', savedTheme);
+        </script>
+
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+        <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    </head>
+    <body class="d-flex flex-column vh-100">
+        
+        <header class="d-flex justify-content-between align-items-center px-4 py-3 border-bottom custom-header">
+            <div class="fw-semibold fs-5">X-Ray Examiner</div>
+            <div class="d-flex align-items-center">
+                <span class="text-muted small me-4">{{ image_count }}/20 Images</span>
+                <button id="theme-toggle" class="btn btn-sm btn-ghost me-2" type="button">🌓</button>
+                <a href="/clear" class="btn btn-sm btn-outline-secondary">Clear Chat</a>
+            </div>
+        </header>
+
+        <main class="flex-grow-1 overflow-auto w-100" id="chat-window">
+            <div class="mx-auto w-100 px-3 py-4" style="max-width: 800px;">
+                {% if error_message %}
+                <div class="alert alert-danger mb-4 rounded-3 border-0" role="alert">
+                    {{ error_message }}
+                </div>
+                {% endif %}
+
+                {% for message in chat_history %}
+                    {% if message.sender == 'user' %}
+                    <div class="mb-4">
+                        <div class="fw-bold mb-1 user-label">You</div>
+                        <div class="message-text">{{ message.text }}</div>
+                    </div>
+                    {% elif message.sender == 'bot' %}
+                    <div class="mb-4">
+                        <div class="fw-bold mb-1 ai-label">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-robot me-1 mb-1" viewBox="0 0 16 16">
+                              <path d="M6 12.5a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3a.5.5 0 0 1-.5-.5ZM3 8.062C3 6.76 4.235 5.765 5.53 5.889a2.89 2.89 0 0 0 2.523-1.554l.434-.847a.5.5 0 0 1 .863 0l.434.847a2.89 2.89 0 0 0 2.523 1.554C13.765 5.765 15 6.76 15 8.062v1.138a4.992 4.992 0 0 1-1.077 3.109l.34.894a.5.5 0 0 1-.462.676H2.2a.5.5 0 0 1-.462-.676l.34-.894A4.992 4.992 0 0 1 3 9.2V8.062Zm1.5-.3a.5.5 0 0 0-.5.5v1.138a4.002 4.002 0 0 0 1.054 2.716l-.213.561h8.318l-.213-.561A4.002 4.002 0 0 0 13 9.2V8.262a.5.5 0 0 0-.5-.5h-8ZM7 6.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0Zm4 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"/>
+                            </svg>
+                            AI Assistant
+                        </div>
+                        <div class="message-text" style="line-height: 1.6;">{{ message.text }}</div>
+                    </div>
+                    {% endif %}
+                {% endfor %}
+            </div>
+        </main>
+
+        <div class="w-100 pb-4 pt-2">
+            <div class="mx-auto px-3" style="max-width: 800px;">
+                <form action="/results" method="POST" enctype="multipart/form-data">
+                    <div class="input-group p-2 rounded-4 floating-input-container align-items-end">
+                        
+                        <!-- Using visually-hidden instead of d-none for accessibility -->
+                        <input type="file" id="xray_upload" class="visually-hidden" name="xray_image" accept="image/*" multiple {% if image_count >= 20 %}disabled{% endif %}>
+                        <label for="xray_upload" class="btn btn-ghost text-secondary border-0 d-flex align-items-center mb-1" style="cursor: pointer;" title="Attach X-ray" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' ') { document.getElementById('xray_upload').click(); event.preventDefault(); }">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
+                                <path d="M4.5 3a2.5 2.5 0 0 1 5 0v9a1.5 1.5 0 0 1-3 0V5a.5.5 0 0 1 1 0v7a.5.5 0 0 0 1 0V3a1.5 1.5 0 1 0-3 0v9a2.5 2.5 0 0 0 5 0V5a.5.5 0 0 1 1 0v7a3.5 3.5 0 1 1-7 0V3z"/>
+                            </svg>
+                        </label>
+                        
+                        <!-- Auto-expanding textarea instead of single-line input -->
+                        <textarea class="form-control border-0 shadow-none bg-transparent chat-input py-2" name="user_message" placeholder="Message the AI..." rows="1" style="resize: none; overflow-y: hidden;" oninput="this.style.height = ''; this.style.height = this.scrollHeight + 'px'"></textarea>
+                        
+                        <button class="btn btn-dark rounded-3 px-3 mb-1 d-flex align-items-center justify-content-center" type="submit" style="height: 36px;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                              <path fill-rule="evenodd" d="M1 8a7 7 0 1 0 14 0A7 7 0 0 0 1 8zm15 0A8 8 0 1 1 0 8a8 8 0 0 1 16 0zm-7.5 3.5a.5.5 0 0 1-1 0V5.707L5.354 7.854a.5.5 0 1 1-.708-.708l3-3a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1-.708.708L8.5 5.707V11.5z"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <div id="file-selection-text" class="form-text text-center mt-2 d-none fw-medium small"></div>
+                </form>
+            </div>
+        </div>
+
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+        <script src="{{ url_for('static', filename='script.js') }}"></script>
+    </body>
+</html>

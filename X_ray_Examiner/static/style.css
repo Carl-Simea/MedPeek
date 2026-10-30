@@ -1,0 +1,129 @@
+/* Light Mode (Default) Variables */
+:root, [data-bs-theme="light"] {
+    --bg-color: #f1f5f9;
+    --card-bg: #ffffff;
+    --primary-dark: #0f172a;
+    --primary-accent: #2563eb;
+    --primary-hover: #1d4ed8;
+    --text-main: #334155;
+    --chat-user-bg: #eff6ff;
+    --chat-bot-bg: #f8fafc;
+    --border-color: #e2e8f0;
+    --input-bg: #ffffff;
+}
+
+/* Dark Mode Variables */
+[data-bs-theme="dark"] {
+    --bg-color: #0f172a;
+    --card-bg: #1e293b;
+    --primary-dark: #020617;
+    --primary-accent: #3b82f6;
+    --primary-hover: #60a5fa;
+    --text-main: #e2e8f0;
+    --chat-user-bg: #1e3a8a;
+    --chat-bot-bg: #334155;
+    --border-color: #475569;
+    --input-bg: #0f172a;
+}
+
+body {
+    background-color: var(--bg-color);
+    color: var(--text-main);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.card {
+    background-color: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05) !important;
+    transition: background-color 0.3s ease, border-color 0.3s ease;
+}
+
+.card-header {
+    background-color: var(--primary-dark) !important;
+    color: white;
+    padding: 1.25rem 1.5rem;
+    font-weight: 600;
+    border-bottom: none;
+    border-top-left-radius: 16px !important;
+    border-top-right-radius: 16px !important;
+}
+
+.card-body {
+    background-color: transparent !important;
+    height: 55vh !important;
+    padding: 1.5rem;
+}
+
+.card-footer {
+    background-color: var(--card-bg);
+    border-top: 1px solid var(--border-color) !important;
+    padding: 1.25rem 1.5rem;
+    border-bottom-left-radius: 16px !important;
+    border-bottom-right-radius: 16px !important;
+}
+
+/* Form Inputs */
+.form-control, .input-group {
+    background-color: var(--input-bg) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-main) !important;
+}
+.form-control::placeholder {
+    color: #94a3b8;
+}
+.form-control:focus {
+    border-color: var(--primary-accent) !important;
+    box-shadow: 0 0 0 0.25rem rgba(37, 99, 235, 0.15);
+}
+
+.btn-primary {
+    background-color: var(--primary-accent) !important;
+    border-color: var(--primary-accent) !important;
+    font-weight: 500;
+}
+.btn-primary:hover {
+    background-color: var(--primary-hover) !important;
+}
+.btn-light {
+    background-color: var(--card-bg);
+    color: var(--text-main) !important;
+}
+
+/* Chat Bubbles */
+.chat-bubble {
+    padding: 1rem 1.25rem;
+    border-radius: 12px;
+    max-width: 85%;
+    display: inline-block;
+    color: var(--text-main);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+    white-space: pre-line; /* keep the line breaks in the AI's replies */
+}
+.user-bubble {
+    background-color: var(--chat-user-bg);
+    border: 1px solid var(--primary-accent);
+    border-bottom-right-radius: 4px;
+}
+.bot-bubble {
+    background-color: var(--chat-bot-bg);
+    border: 1px solid var(--border-color);
+    border-bottom-left-radius: 4px;
+}
+
+/* Page Transition Animations */
+main.container {
+    opacity: 0;
+    transform: translateY(15px);
+    transition: opacity 0.4s ease-out, transform 0.4s ease-out;
+}
+main.container.loaded {
+    opacity: 1;
+    transform: translateY(0);
+}
+main.container.exiting {
+    opacity: 0;
+    transform: translateY(-15px);
+}
