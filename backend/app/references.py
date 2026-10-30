@@ -156,6 +156,18 @@ class ReferenceLibrary:
                 picked.append(c)
         return picked
 
+    def guess_body_part(self, modality: str, query_vector: np.ndarray, k: int = 25) -> str | None:
+        """Vote among the k most similar verified images (any body part) to guess what the image shows."""
+        pool = [c for c in self.cases if c.modality == modality and c.vector is not None
+                and c.vector.shape == query_vector.shape]
+        if not pool:
+            return None
+        sims = np.stack([c.vector for c in pool]) @ query_vector
+        votes: dict[str, float] = {}
+        for i in np.argsort(-sims)[:k]:
+            votes[pool[i].body_part] = votes.get(pool[i].body_part, 0.0) + max(float(sims[i]), 0.0)
+        return max(votes, key=votes.get) if votes else None
+
     def image_b64(self, case: ReferenceCase) -> str:
         return base64.b64encode(Path(case.image_path).read_bytes()).decode("ascii")
 

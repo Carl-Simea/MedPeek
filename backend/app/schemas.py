@@ -6,15 +6,11 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel
 
-Confidence = Literal["high", "moderate", "low"]
-
-
 class Finding(BaseModel):
     finding: str
     location: str = ""
     explanation: str = ""
     supported_by_reference_data: bool
-    confidence: Optional[Confidence] = None  # null when the verified data doesn't cover it
 
 
 class Referral(BaseModel):
@@ -47,10 +43,9 @@ class AnalysisResult(BaseModel):
     image_quality: Literal["good", "limited", "unreadable"]
     primary_condition: str = ""
     condition_in_reference_data: bool
+    coverage_note: str = ""
     summary: str
     findings: list[Finding]
-    overall_confidence: Optional[Confidence] = None  # null = not given (not covered by verified data)
-    confidence_reason: str = ""
     urgency: Literal["routine", "soon", "urgent", "emergency"]
     urgency_notice: Optional[str] = None
     referral: Referral
@@ -61,6 +56,9 @@ class AnalysisResult(BaseModel):
     reference_library_size: int = 0
     safety_notes: list[str]
     disclaimer: str
+    ai_notice: str  # always "MedPeek is AI and can make mistakes." -- show it highlighted at the bottom of the report
+    body_part_detected_by: str = "user"  # "user", "question" or "image" (when body_part was "auto")
+    engine: str = ""  # "google" (hosted Gemma 4), "ollama" (local Gemma 4) or "mock"
     model: str
     mock: bool = False
     processing_seconds: float

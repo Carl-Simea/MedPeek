@@ -5,7 +5,7 @@ from __future__ import annotations
 from .body_parts import SPECIALISTS, body_part_label, modality_label
 from .references import ReferenceCase
 
-SYSTEM_PROMPT = """You are the image-reading assistant inside a patient app. You run on Gemma 4.
+SYSTEM_PROMPT = """You are MedPeek, the image-reading assistant inside a patient app. You run on Gemma 4.
 A patient uploads one of their own medical images (usually an X-ray). Before you answer, you are shown
 verified reference cases from published, expert-labeled datasets, and a list of the conditions that verified data covers.
 
@@ -20,8 +20,6 @@ Grounding in the verified data:
 - Set condition_in_reference_data to true only if the patient's main condition (or "normal") is one of the conditions
   listed as covered by the verified data AND the patient's image resembles those cases. Otherwise set it to false.
 - For each finding, set supported_by_reference_data the same way.
-- Give a confidence (high / moderate / low) only for what the verified data supports; it will be hidden from the
-  patient when the condition is not covered.
 
 Referral (always fill it in):
 - Choose the specialist who usually treats this kind of problem (for example a broken bone -> orthopedic surgeon,
@@ -56,13 +54,10 @@ OUTPUT_SCHEMA: dict = {
                     "location": {"type": "string"},
                     "explanation": {"type": "string"},
                     "supported_by_reference_data": {"type": "boolean"},
-                    "confidence": {"type": "string", "enum": ["high", "moderate", "low"]},
                 },
-                "required": ["finding", "location", "explanation", "supported_by_reference_data", "confidence"],
+                "required": ["finding", "location", "explanation", "supported_by_reference_data"],
             },
         },
-        "overall_confidence": {"type": "string", "enum": ["high", "moderate", "low"]},
-        "confidence_reason": {"type": "string"},
         "urgency": {"type": "string", "enum": ["routine", "soon", "urgent", "emergency"]},
         "referral": {
             "type": "object",
@@ -85,8 +80,6 @@ OUTPUT_SCHEMA: dict = {
         "condition_in_reference_data",
         "summary",
         "findings",
-        "overall_confidence",
-        "confidence_reason",
         "urgency",
         "referral",
         "reference_comparison",
@@ -117,7 +110,7 @@ def build_user_prompt(
 
     if covered_conditions:
         total = sum(n for _, n in covered_conditions)
-        listed = ", ".join(f"{name} ({n})" for name, n in covered_conditions[:12])
+        listed = ", ".join(f"{name} ({n})" for name, n in covered_conditions[:25])
         lines.append(f"Conditions covered by our verified data for this body part ({total} cases): {listed}.")
         if sources:
             lines.append(f"Data sources: {', '.join(sources[:6])}.")

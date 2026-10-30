@@ -1,33 +1,45 @@
-"""HTTP API for the X-ray/MRI reader. Run: uvicorn app.main:app --port 8000"""
+"""MedPeek API: Gemma 4 explains X-ray, MRI and CT images, checked against verified reference cases.
+
+Run: uvicorn app.main:app --port 8000   (or ./run.sh)
+"""
 
 from __future__ import annotations
 
 import asyncio
 import hmac
 import json
+import logging
+import time
+import uuid
+from collections import defaultdict, deque
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import gemma
-from .body_parts import BODY_PARTS, MODALITIES, normalize_body_part, normalize_modality
+from .body_parts import BODY_PARTS, MODALITIES, body_part_from_text, normalize_body_part, normalize_modality
 from .config import settings
-from .imaging import ImageError, prepare_image
+from .imaging import ImageError, prepare_image, thumbnail_vector
 from .jobs import JobQueue
 from .pipeline import run_analysis
 from .references import ReferenceLibrary
 from .schemas import AnalysisResult, JobStatus, Options, ReferenceUsed
 
+VERSION = "1.1.0"
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+log = logging.getLogger("medpeek.api")
+
 app = FastAPI(
-    title="Hacktober-Fest X-ray API",
-    version="0.1.0",
+    title="MedPeek API",
+    version=VERSION,
     description=(
         "Upload an X-ray, MRI or CT image and get a plain-language explanation from Gemma 4, "
-        "compared against verified reference cases. Educational only, not a diagnosis."
+        "compared against verified reference cases, with a referral to the right specialist. "
+        "MedPeek is AI and can make mistakes. It is not a diagnosis."
     ),
 )
 app.add_middleware(
@@ -39,6 +51,42 @@ app.add_middleware(
 
 library = ReferenceLibrary(settings.reference_dir)
 jobs = JobQueue()
+_recent_requests: dict[str, deque] = defaultdict(deque)
+
+
+@app.middleware("http")
+async def request_log(request: Request, call_next):
+    """Give every request an id and log method, path, status and time (never the image or question)."""
+    request_id = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
+    started = time.monotonic()
+    try:
+        response = await call_next(request)
+    except Exception:
+        log.exception("request %s %s %s failed", request_id, request.method, request.url.path)
+        response = JSONResponse({"detail": "Something went wrong on our side. Please try again."}, status_code=500)
+    response.headers["X-Request-ID"] = request_id
+    if not request.url.path.startswith("/api/jobs/"):  # polling is too chatty to log
+        log.info("%s %s %s %d %.0fms", request_id, request.method, request.url.path, response.status_code,
+                 (time.monotonic() - started) * 1000)
+    return response
+
+
+def _client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    return forwarded.split(",")[0].strip() or (request.client.host if request.client else "unknown")
+
+
+def _rate_limit(request: Request) -> None:
+    """At most ANALYZE_PER_MINUTE analyses per visitor per minute, and a cap on the waiting line."""
+    if settings.analyze_per_minute > 0:
+        now, window = time.monotonic(), _recent_requests[_client_ip(request)]
+        while window and now - window[0] > 60:
+            window.popleft()
+        if len(window) >= settings.analyze_per_minute:
+            raise HTTPException(429, "Too many images in a minute. Please wait a moment and try again.")
+        window.append(now)
+    if settings.max_waiting_jobs > 0 and jobs.waiting() >= settings.max_waiting_jobs:
+        raise HTTPException(503, "MedPeek is busy right now. Please try again in a minute.")
 
 
 def _read_limit() -> int:
@@ -53,6 +101,12 @@ async def _read_upload(upload: UploadFile) -> bytes:
 
 
 def _check_choices(body_part: str, modality: str) -> tuple[str, str]:
+    if (body_part or "").strip().lower() in ("", "auto"):
+        bp = "auto"
+        mod = normalize_modality(modality)
+        if mod is None:
+            raise HTTPException(422, f"Unknown modality '{modality}'. Use one of: {', '.join(MODALITIES)}.")
+        return bp, mod
     bp = normalize_body_part(body_part)
     if bp is None:
         raise HTTPException(422, f"Unknown body_part '{body_part}'. Use one of: {', '.join(BODY_PARTS)}.")
@@ -64,8 +118,16 @@ def _check_choices(body_part: str, modality: str) -> tuple[str, str]:
 
 @app.get("/api/health", tags=["status"])
 def health() -> dict:
-    """Is the API up, is Gemma 4 ready, and how many reference cases are loaded."""
-    return {"status": "ok", **gemma.status(), "mock": settings.mock_gemma, "reference_cases": len(library.cases)}
+    """Is the API up, which Gemma 4 engine answers (google = hosted, ollama = local), and how many reference cases are loaded."""
+    return {
+        "status": "ok",
+        "service": "MedPeek API",
+        "version": VERSION,
+        **gemma.status(),
+        "mock": settings.mock_gemma,
+        "reference_cases": len(library.cases),
+        "waiting_jobs": jobs.waiting(),
+    }
 
 
 @app.get("/api/options", response_model=Options, tags=["status"])
@@ -86,14 +148,19 @@ def options() -> dict:
     responses={200: {"model": AnalysisResult, "description": "The finished result (only when wait=true)"}},
 )
 async def analyze(
+    request: Request,
     image: UploadFile = File(..., description="X-ray/MRI/CT image: JPG, PNG, WEBP or DICOM (.dcm)"),
-    body_part: str = Form(..., description="e.g. chest, knee, wrist, lumbar_spine (see /api/options)"),
+    body_part: str = Form("auto", description="An id from /api/options (e.g. wrist_hand), plain words (knee), or auto"),
     modality: str = Form("xray", description="xray, mri or ct"),
     question: str = Form("", description="Optional question from the patient"),
     wait: bool = Query(False, description="true = wait for the result instead of getting a job id"),
 ):
-    """Start an analysis. Returns a job id to poll at /api/jobs/{job_id} (or the result if wait=true)."""
+    """Start an analysis. Returns a job id to poll at /api/jobs/{job_id} (or the result if wait=true).
+
+    body_part=auto: MedPeek uses the body part named in the question, or else the most similar verified images.
+    """
     bp, mod = _check_choices(body_part, modality)
+    _rate_limit(request)
     data = await _read_upload(image)
     try:
         prepared = prepare_image(data, image.filename or "", max_side=settings.max_image_side)
@@ -103,7 +170,18 @@ async def analyze(
         del data
 
     q = (question or "").strip()[:500]
-    job_id = jobs.submit(lambda: run_analysis(image=prepared, body_part=bp, modality=mod, question=q, library=library))
+    detected_by = "user"
+    if bp == "auto":
+        bp, detected_by = body_part_from_text(q), "question"
+        if bp is None:
+            bp, detected_by = library.guess_body_part(mod, thumbnail_vector(prepared.png_bytes)), "image"
+        if bp is None:
+            bp, detected_by = "whole_body", "image"
+    job_id = jobs.submit(
+        lambda: run_analysis(
+            image=prepared, body_part=bp, modality=mod, question=q, library=library, detected_by=detected_by
+        )
+    )
 
     if not wait:
         return {"job_id": job_id, "status": "queued", "poll_url": f"/api/jobs/{job_id}"}
@@ -214,4 +292,4 @@ else:
 
     @app.get("/", include_in_schema=False)
     def root() -> dict:
-        return {"service": "Hacktober-Fest X-ray API", "try_it": "/try", "docs": "/docs", "health": "/api/health"}
+        return {"service": "MedPeek API", "version": VERSION, "try_it": "/try", "docs": "/docs", "health": "/api/health"}

@@ -3,6 +3,8 @@ words patients actually type, and the specialist who usually handles each area."
 
 from __future__ import annotations
 
+import re
+
 BODY_PARTS: dict[str, dict] = {
     "skull_face_sinuses": {
         "label": "Skull, face and sinuses",
@@ -150,3 +152,24 @@ def modality_label(key: str) -> str:
 
 def default_specialist(body_part: str) -> str:
     return BODY_PARTS.get(body_part, {}).get("specialist", "Primary care doctor")
+
+
+_CHILD_WORDS = re.compile(r"\b(child|children|kid|kids|baby|babies|infant|toddler|son|daughter|boy|girl|newborn)\b")
+
+
+def body_part_from_text(text: str) -> str | None:
+    """Find a body part named in the patient's own words ('I fell on my wrist' -> wrist_hand)."""
+    t = " " + re.sub(r"[^a-z0-9]+", " ", (text or "").lower()) + " "
+    best: tuple[str, int] | None = None
+    for key, info in BODY_PARTS.items():
+        if key == "whole_body":
+            continue
+        for word in (info["label"].lower(), *info["synonyms"]):
+            w = re.sub(r"[^a-z0-9]+", " ", word.lower()).strip()
+            if w and f" {w} " in t and (best is None or len(w) > best[1]):
+                best = (key, len(w))
+    if best is None:
+        return None
+    if best[0] == "chest_adult" and _CHILD_WORDS.search(t):
+        return "chest_child"
+    return best[0]

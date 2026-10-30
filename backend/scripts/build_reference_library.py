@@ -50,6 +50,8 @@ FILES = {
     "BTXRD.zip": "https://ndownloader.figshare.com/files/50653575",
     "BDCXR-3257.zip": "https://ndownloader.figshare.com/files/64149946",
     "IU_chest_test.parquet": "https://huggingface.co/datasets/MLforHealthcare/Indiana_University_Chest_X-ray_Collection/resolve/main/data/test-00000-of-00001.parquet",
+    "IU_chest_train0.parquet": "https://huggingface.co/datasets/MLforHealthcare/Indiana_University_Chest_X-ray_Collection/resolve/main/data/train-00000-of-00003.parquet",
+    "IU_chest_train1.parquet": "https://huggingface.co/datasets/MLforHealthcare/Indiana_University_Chest_X-ray_Collection/resolve/main/data/train-00001-of-00003.parquet",
     "ROCOv2_valid_images.zip": "https://zenodo.org/api/records/10821435/files/valid_images.zip/content",
     "ROCOv2_valid_captions.csv": "https://zenodo.org/api/records/10821435/files/valid_captions.csv/content",
     "ROCOv2_valid_concepts_manual.csv": "https://zenodo.org/api/records/10821435/files/valid_concepts_manual.csv/content",
@@ -393,8 +395,12 @@ IU_NORMAL = [r"no acute", r"normal chest", r"no active", r"negative chest", r"lu
 def load_iu_chest(ds: Datasets) -> Iterator[Candidate]:
     import pyarrow.parquet as pq
 
-    table = pq.read_table(ds.path("IU_chest_test.parquet"), columns=["image", "report"])
     seen_studies: set[str] = set()
+    for shard in ("IU_chest_test.parquet", "IU_chest_train0.parquet", "IU_chest_train1.parquet"):
+        yield from _iu_shard(pq.read_table(ds.path(shard), columns=["image", "report"]), seen_studies)
+
+
+def _iu_shard(table, seen_studies: set[str]) -> Iterator[Candidate]:
     for image, report in zip(table.column("image").to_pylist(), table.column("report").to_pylist()):
         if not image or not image.get("bytes") or not report:
             continue
@@ -591,7 +597,28 @@ LOADERS: dict[str, Callable[[Datasets], Iterator[Candidate]]] = {
 
 
 # ---------------------------------------------------------------- build
-def plan_cases(names: list[str], ds: Datasets, per_class: int, seed: int) -> list[Candidate]:
+def case_slug(filename: str) -> str:
+    """Same rule the library uses to name case folders, so we can tell what's already in it."""
+    return re.sub(r"[^a-z0-9]+", "-", Path(filename).stem.lower()).strip("-")[:40] or "case"
+
+
+def existing_slugs(out: Path) -> set[str]:
+    return {p.name.rsplit("-", 1)[0] for p in out.glob("*/*/*") if p.is_dir()}
+
+
+def sample_slugs(out: Path) -> set[str]:
+    """The /try page's sample X-rays must stay out of the library (they are the held-out test images)."""
+    manifest = out.parent / "samples" / "samples.json"
+    try:
+        items = json.loads(manifest.read_text())
+    except (OSError, ValueError):
+        return set()
+    return {case_slug(i["source_file"]) for i in items if isinstance(i, dict) and i.get("source_file")}
+
+
+def plan_cases(
+    names: list[str], ds: Datasets, per_class: int, seed: int, skip: set[str] | None = None
+) -> list[Candidate]:
     rng = random.Random(seed)
     plan: list[Candidate] = []
     for name in names:
@@ -599,6 +626,8 @@ def plan_cases(names: list[str], ds: Datasets, per_class: int, seed: int) -> lis
         try:
             groups: dict[tuple[str, str], list[Candidate]] = defaultdict(list)
             for c in LOADERS[name](ds):
+                if skip and case_slug(c.filename) in skip:
+                    continue
                 groups[(c.body_part, c.diagnosis or "normal")].append(c)
         except Exception as exc:  # one broken source shouldn't stop the others
             print(f"! {name}: skipped ({exc})", flush=True)
@@ -635,8 +664,13 @@ def main() -> None:
         sys.exit(f"Unknown sources: {unknown}. Choose from {list(LOADERS)}")
 
     ds = Datasets(Path(args.datasets), remote=args.remote)
-    print(f"Planning from {len(names)} sources (each file < 1 GB) ...", flush=True)
-    plan = plan_cases(names, ds, args.per_class, args.seed)
+    out = Path(args.out)
+    skip = sample_slugs(out)
+    if not args.clean:
+        skip |= existing_slugs(out)  # keep the current library and only add new images
+    print(f"Planning from {len(names)} sources (each file < 1 GB); skipping {len(skip)} images already used ...",
+          flush=True)
+    plan = plan_cases(names, ds, args.per_class, args.seed, skip)
     by_part = Counter(c.body_part for c in plan)
     print("\nPlanned cases per body part:")
     for part, n in sorted(by_part.items()):
@@ -645,7 +679,6 @@ def main() -> None:
     if args.dry_run:
         return
 
-    out = Path(args.out)
     if args.clean and out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True, exist_ok=True)

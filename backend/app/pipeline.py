@@ -22,13 +22,14 @@ def run_analysis(
     modality: str,
     question: str,
     library: ReferenceLibrary,
+    detected_by: str = "user",
 ) -> dict:
     started = time.monotonic()
     refs = library.retrieve(body_part, modality, settings.max_reference_cases, query_vector=thumbnail_vector(image.png_bytes))
     covered = library.conditions(body_part, modality)
 
     if settings.mock_gemma:
-        raw = gemma.mock_answer(body_part, modality)
+        raw, info = gemma.mock_answer(body_part, modality)
     else:
         attach = settings.send_reference_images and bool(refs)
         images = [library.image_b64(c) for c in refs] if attach else []
@@ -42,7 +43,7 @@ def run_analysis(
             covered_conditions=covered,
             sources=library.sources(body_part, modality),
         )
-        raw, _timing = gemma.analyze(prompt, images)
+        raw, info = gemma.analyze(prompt, images)
 
     final = finalize(raw, body_part=body_part, modality=modality, references_used=len(refs), covered_conditions=covered)
     return {
@@ -55,7 +56,9 @@ def run_analysis(
         **final,
         "references_used": [c.public() for c in refs],
         "reference_library_size": sum(n for _, n in covered),
-        "model": settings.gemma_model,
+        "body_part_detected_by": detected_by,
+        "engine": info.get("engine", ""),
+        "model": info.get("model", settings.gemma_model),
         "mock": settings.mock_gemma,
         "processing_seconds": round(time.monotonic() - started, 1),
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),

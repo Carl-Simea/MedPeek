@@ -110,6 +110,10 @@ def prepare_image(data: bytes, filename: str = "", max_side: int = 1024) -> Prep
     else:
         try:
             img = Image.open(io.BytesIO(data))
+            if img.format == "JPEG" and max(img.size) > max_side * 2:
+                # decode big JPEGs at a reduced scale: much faster, and still larger than we keep
+                w, h = img.size
+                img.draft(img.mode, (max(1, w * max_side // max(w, h)), max(1, h * max_side // max(w, h))))
             img.load()
         except (UnidentifiedImageError, OSError) as exc:
             raise ImageError("This file isn't a supported image. Upload a JPG, PNG, WEBP or DICOM (.dcm) file.") from exc
