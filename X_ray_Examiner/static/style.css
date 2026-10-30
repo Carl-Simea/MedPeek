@@ -30,3 +30,13 @@ body.dark .logo-halo{background:#335f46}body.dark .welcome .chips span{border-co
 .chat-shell{display:grid;grid-template-columns:240px minmax(0,1fr);max-width:1250px;margin:auto}.chat-shell .chat-layout{width:100%}.history-panel{padding:26px 16px;border-right:1px solid var(--line);height:calc(100dvh - 96px);overflow:auto}.history-panel h2{font-size:14px}.history-panel p{font-size:11px}.history-panel nav{display:flex;flex-direction:column;align-items:stretch;gap:8px}.history-panel a{color:var(--ink);text-decoration:none;padding:12px;border-radius:12px;font-size:12px;overflow-wrap:anywhere}.history-panel a:hover,.history-panel a[aria-current]{background:var(--soft)}@media(max-width:750px){.chat-shell{display:block}.history-panel{height:auto;max-height:150px;border-right:0;border-bottom:1px solid var(--line);padding:10px 16px}.history-panel p{display:none}.history-panel nav{flex-direction:row;overflow:auto}.history-panel a{min-width:140px}.chat-shell .chat-layout{height:calc(100dvh - 220px)}}
 
 .sample-prompts{display:flex;gap:8px;overflow:auto;margin:0 0 12px}.sample-prompts button{font-size:11px;white-space:nowrap;background:var(--soft);padding:8px 12px}
+/* Use more of a landscape display while retaining comfortable outer margins. */
+@media (min-width: 751px) {
+  .chat-shell {
+    width: calc(100% - clamp(32px, 5vw, 96px));
+    max-width: 1480px;
+  }
+  .chat-shell .chat-layout {
+    max-width: 1140px;
+  }
+}
