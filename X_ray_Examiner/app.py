@@ -1,11 +1,11 @@
 import os
 import secrets
 import requests
-from flask import Flask, render_template, request, session, jsonify
+from flask import Flask, render_template, request, session, jsonify, Response
 from services import history
 import threading
 from services.auth import init_auth
-from services.backend_client import get_options, start_analysis, poll_analysis
+from services.backend_client import get_options, start_analysis, poll_analysis, api_url, HEADERS
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY') or secrets.token_hex(32)
@@ -67,6 +67,40 @@ def job(job_id):
         return jsonify(poll_analysis(job_id))
     except (requests.RequestException, ValueError, KeyError):
         return jsonify(error='Unable to check the analysis right now.'), 502
+
+@app.post('/api/report-pdf')
+def report_pdf():
+    """Ask the MedPeek backend to turn a finished report into a PDF the patient can download."""
+    result = request.get_json(silent=True)
+    if not isinstance(result, dict) or not result.get('summary'):
+        return jsonify(error='There is no finished report to save yet.'), 400
+    try:
+        response = requests.post(api_url() + '/api/report/pdf', json=result, headers=HEADERS, timeout=(10, 60))
+        response.raise_for_status()
+    except requests.RequestException:
+        return jsonify(error='The PDF could not be made right now. Please try again.'), 502
+    name = 'MedPeek-report-%s.pdf' % str(result.get('id', 'report'))[:40]
+    return Response(response.content, mimetype='application/pdf',
+                    headers={'Content-Disposition': 'attachment; filename="%s"' % name})
+
+
+@app.post('/api/report-issue')
+def report_issue():
+    """Send a 'report a mistake, bug or issue' message to the MedPeek backend."""
+    data = request.get_json(silent=True) or {}
+    message = str(data.get('message', '')).strip()
+    if len(message) < 3:
+        return jsonify(error='Please tell us a little more.'), 400
+    payload = {'kind': str(data.get('kind', 'issue'))[:20], 'message': message[:2000],
+               'report_id': str(data.get('report_id', ''))[:64], 'contact': str(data.get('contact', ''))[:200],
+               'page': 'medpeek-app'}
+    try:
+        response = requests.post(api_url() + '/api/feedback', json=payload, headers=HEADERS, timeout=(10, 20))
+        response.raise_for_status()
+        return jsonify(response.json()), 201
+    except (requests.RequestException, ValueError):
+        return jsonify(error='Your report could not be sent right now. Please try again.'), 502
+
 
 @app.post('/clear')
 def clear():

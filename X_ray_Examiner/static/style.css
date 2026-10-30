@@ -40,3 +40,23 @@ body.dark .logo-halo{background:#335f46}body.dark .welcome .chips span{border-co
     max-width: 1140px;
   }
 }
+
+/* MedPeek additions: heart spinner, PDF question, report dialog, privacy line */
+.pending .bubble:before{display:none}
+.mp-thinking{display:flex;align-items:center;gap:14px}
+.mp-heart{width:38px;height:38px;flex:none;fill:#e5484d;animation:mpspin 1.6s ease-in-out infinite}
+@keyframes mpspin{0%{transform:rotateY(0) scale(1)}25%{transform:rotateY(90deg) scale(1.12)}50%{transform:rotateY(180deg) scale(1)}75%{transform:rotateY(270deg) scale(1.12)}100%{transform:rotateY(360deg) scale(1)}}
+.mp-word{font:800 18px Manrope,sans-serif;color:var(--ink);white-space:normal}
+.mp-note{font-size:12px;color:var(--muted);margin:0;white-space:normal}
+.pdf-ask{margin-top:16px;padding:14px;border:1px solid var(--line);border-radius:14px;text-align:center;white-space:normal}
+.pdf-ask p{margin:0 0 10px;color:var(--ink)}
+.pdf-ask .row{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+.mp-primary{background:#137c70!important;color:#fff!important;border:0!important}
+.privacy-line{margin-top:4px!important}
+.mp-modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px;z-index:50}
+.mp-modal[hidden]{display:none}
+.mp-modal form{background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:18px;padding:20px;width:100%;max-width:440px;display:flex;flex-direction:column;gap:8px}
+.mp-modal h2{margin:0 0 4px;font:700 18px Manrope,sans-serif}
+.mp-modal label{font-size:12px;font-weight:700;color:var(--muted)}
+.mp-modal textarea,.mp-modal input{flex:none;border:1px solid var(--line);border-radius:12px;padding:10px;background:var(--bg);color:var(--ink);font:14px 'DM Sans',sans-serif}
+.mp-modal .row{display:flex;gap:10px;justify-content:flex-end;margin-top:6px}
