@@ -85,7 +85,7 @@ Poll every 3-5 seconds. `status` goes `queued` -> `running` -> `done` (or `error
     "referral": {"specialist": "Orthopedic surgeon (orthopedics)",
                  "reason": "Orthopedic surgeons treat broken bones...", "timeframe": "Within 1-2 days", "required": true},
     "reference_comparison": "How it compares with the verified cases",
-    "next_steps": ["See a orthopedic surgeon (within 1-2 days).", "..."],
+    "next_steps": ["See an orthopedic surgeon (within 1-2 days).", "..."],
     "questions_for_doctor": ["..."],
     "references_used": [{"case_id": "...", "label": "abnormal", "diagnosis": "fracture", "source": "FracAtlas",
                          "verified_by": "Expert-annotated fracture labels (FracAtlas, Scientific Data 2023)"}],

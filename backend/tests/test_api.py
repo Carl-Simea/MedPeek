@@ -216,3 +216,13 @@ def test_server_double_checks_coverage():
     assert not condition_is_covered("Soft-tissue swelling", ["fracture"])
     assert condition_is_covered("No acute abnormality", ["normal (no abnormality)", "fracture"])
     assert not condition_is_covered("No acute abnormality", ["fracture"])
+
+
+def test_referral_wording_uses_the_right_article():
+    out = finalize(_raw(condition_in_reference_data=False, referral={"specialist": "Orthopedic surgeon (orthopedics)"}),
+                   body_part="thigh_knee", modality="xray", references_used=2)
+    assert "Please see an orthopedic surgeon." in out["confidence_reason"]
+    assert out["next_steps"][0].startswith("See an orthopedic surgeon")
+    out = finalize(_raw(urgency="emergency", condition_in_reference_data=False), body_part="chest_adult", modality="xray",
+                   references_used=2)
+    assert "go to the emergency department" in out["confidence_reason"]

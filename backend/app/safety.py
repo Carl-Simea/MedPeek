@@ -60,6 +60,24 @@ def _mentions_other_body_part(detected: str, expected: str) -> bool:
     return any(any(n in d for n in syns) for key, syns in names.items() if key != expected)
 
 
+def _doctor(specialist: str) -> str:
+    """'Orthopedic surgeon (orthopedics)' -> 'an orthopedic surgeon'; keeps acronyms like ENT."""
+    name = specialist.split(" (")[0]
+    if not name[:3].isupper():
+        name = name[:1].lower() + name[1:]
+    return ("an " if name[:1].lower() in "aeiou" else "a ") + name
+
+
+def _see(specialist: str) -> str:
+    if specialist == "Emergency department":
+        return "go to the emergency department"
+    return f"see {_doctor(specialist)}"
+
+
+def _upper_first(text: str) -> str:
+    return text[:1].upper() + text[1:]
+
+
 def _is_normal(condition: str) -> bool:
     c = condition.lower()
     return not c or any(w in c for w in ("normal", "no abnormal", "no acute", "no fracture", "unremarkable", "none"))
@@ -188,7 +206,12 @@ def finalize(
     referral = {
         "specialist": specialist,
         "reason": _str(ref.get("reason"), 300)
-        or f"A {specialist.split(' (')[0].lower()} usually looks after problems in the {body_part_label(body_part).lower()}.",
+        or (
+            "The emergency department can check this right away."
+            if specialist == "Emergency department"
+            else f"{_upper_first(_doctor(specialist))} usually looks after problems in the "
+            f"{body_part_label(body_part).lower()}."
+        ),
         "timeframe": _str(ref.get("timeframe"), 80) or TIMEFRAMES[urgency],
         "required": (not supported) or urgency in ("urgent", "emergency") or not _is_normal(condition),
     }
@@ -202,7 +225,7 @@ def finalize(
         referral.update(specialist="Primary care doctor", required=False, timeframe=TIMEFRAMES["routine"])
 
     next_steps = _str_list(raw.get("next_steps"), 4)
-    see = f"See a {referral['specialist'].split(' (')[0].lower()} ({referral['timeframe'].lower()})."
+    see = f"{_upper_first(_see(referral['specialist']))} ({referral['timeframe'].lower()})."
     if referral["required"] and not any(referral["specialist"].split(" (")[0].lower() in s.lower() for s in next_steps):
         next_steps.insert(0, see)
     if not any("radiolog" in s.lower() or "report" in s.lower() for s in next_steps):
@@ -219,7 +242,7 @@ def finalize(
         "overall_confidence": _cap(str(raw.get("overall_confidence", "low")), cap) if supported else None,
         "confidence_reason": _str(raw.get("confidence_reason"), 400)
         if supported
-        else f"Not given: this isn't well covered by our verified data. Please see a {referral['specialist'].split(' (')[0].lower()}.",
+        else f"Not given: this isn't well covered by our verified data. Please {_see(referral['specialist'])}.",
         "urgency": urgency,
         "urgency_notice": EMERGENCY_NOTICE if urgency == "emergency" else URGENT_NOTICE if urgency == "urgent" else None,
         "referral": referral,
