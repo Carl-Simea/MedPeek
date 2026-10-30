@@ -47,6 +47,17 @@ class Settings:
     ollama_timeout: float = field(default_factory=lambda: float(os.environ.get("OLLAMA_TIMEOUT", "600")))
     num_ctx: int = field(default_factory=lambda: int(os.environ.get("GEMMA_NUM_CTX", "8192")))
     num_thread: int = field(default_factory=lambda: int(os.environ.get("GEMMA_NUM_THREAD", "0")))  # 0 = Ollama decides
+    # Google-hosted Gemma 4 (fast). "auto" = use it when an API key is set, otherwise the local copy.
+    gemma_provider: str = field(default_factory=lambda: os.environ.get("GEMMA_PROVIDER", "auto").strip().lower())
+    google_api_key: str = field(
+        default_factory=lambda: (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip()
+    )
+    google_model: str = field(default_factory=lambda: os.environ.get("GOOGLE_GEMMA_MODEL", "gemma-4-26b-a4b-it"))
+    google_timeout: float = field(default_factory=lambda: float(os.environ.get("GOOGLE_TIMEOUT", "90")))
+    fallback_to_local: bool = field(default_factory=lambda: _bool("FALLBACK_TO_LOCAL", True))
+    # Abuse protection now that the API can be public.
+    analyze_per_minute: int = field(default_factory=lambda: int(os.environ.get("ANALYZE_PER_MINUTE", "8")))
+    max_waiting_jobs: int = field(default_factory=lambda: int(os.environ.get("MAX_WAITING_JOBS", "10")))
     reference_dir: Path = field(default_factory=lambda: _path("REFERENCE_DIR", BACKEND_DIR / "data" / "reference"))
     max_reference_cases: int = field(default_factory=lambda: int(os.environ.get("MAX_REFERENCE_CASES", "2")))
     send_reference_images: bool = field(default_factory=lambda: _bool("SEND_REFERENCE_IMAGES", True))

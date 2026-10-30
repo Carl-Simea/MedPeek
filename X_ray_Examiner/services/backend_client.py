@@ -50,8 +50,8 @@ def format_result(result):
         lines.append(result['urgency_notice'])
     for item in result.get('findings', []):
         lines.append(f"{item['finding']}: {item.get('explanation', '')}")
-    if result.get('overall_confidence'):
-        lines.append('Confidence: ' + result['overall_confidence'])
+    if result.get('coverage_note'):
+        lines.append(result['coverage_note'])
     if result.get('reference_comparison'):
         lines.append(result['reference_comparison'])
     referral = result.get('referral', {})
@@ -59,6 +59,7 @@ def format_result(result):
         lines.append(f"See {referral['specialist']} ({referral['timeframe']}): {referral['reason']}")
     lines.extend(result.get('next_steps', []))
     lines.extend(result.get('safety_notes', []))
+    lines.append(result.get('ai_notice', 'MedPeek is AI and can make mistakes.'))
     lines.append(result.get('disclaimer', 'Educational only, not a diagnosis.'))
     return '\n\n'.join(lines)
 

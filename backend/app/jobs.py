@@ -33,6 +33,11 @@ class JobQueue:
         self._executor.submit(self._run, job_id, fn)
         return job_id
 
+    def waiting(self) -> int:
+        """How many jobs are queued or running right now."""
+        with self._lock:
+            return sum(1 for j in self._jobs.values() if j["status"] in ("queued", "running"))
+
     def _run(self, job_id: str, fn: Callable[[], dict]) -> None:
         self._update(job_id, status="running", started=time.monotonic())
         try:

@@ -36,9 +36,10 @@ def main() -> None:
     out.mkdir(parents=True, exist_ok=True)
     items: list[dict] = []
 
-    def add(name: str, data: bytes, title: str, body_part: str, question: str, credit: str) -> None:
+    def add(name: str, data: bytes, title: str, body_part: str, question: str, credit: str, source_file: str) -> None:
         (out / name).write_bytes(data)
-        items.append({"file": name, "title": title, "body_part": body_part, "question": question, "credit": credit})
+        items.append({"file": name, "title": title, "body_part": body_part, "question": question, "credit": credit,
+                      "source_file": source_file})
         print(f"added {name}")
 
     # 1. Wrist after a fall (FracAtlas, fracture)
@@ -48,7 +49,7 @@ def main() -> None:
              and slug(r["image_id"]) not in used]
     r = picks[min(3, len(picks) - 1)]
     add("wrist_after_fall.jpg", z.read(f"FracAtlas/images/Fractured/{r['image_id']}"), "Wrist after a fall",
-        "wrist_hand", "I fell on my hand and it hurts. Is it broken?", "FracAtlas (CC BY 4.0)")
+        "wrist_hand", "I fell on my hand and it hurts. Is it broken?", "FracAtlas (CC BY 4.0)", r["image_id"])
 
     # 2. Child with cough and fever (BDCXR-3257, bacterial pneumonia)
     z = zipfile.ZipFile(datasets / "BDCXR-3257.zip")
@@ -58,7 +59,8 @@ def main() -> None:
         key = slug(r["Filename"].replace("-", "_"))
         if r["Class"] == "Pneumonia Bacterial" and key in names and key not in used:
             add("child_cough_fever.jpg", z.read(names[key]), "Child with cough and fever", "chest_child",
-                "My child has had a cough and fever for 3 days. What does the X-ray show?", "BDCXR-3257 (CC BY 4.0)")
+                "My child has had a cough and fever for 3 days. What does the X-ray show?", "BDCXR-3257 (CC BY 4.0)",
+                Path(names[key]).name)
             break
 
     # 3. Lump above the knee (BTXRD, bone tumor of the thigh bone)
@@ -73,7 +75,7 @@ def main() -> None:
     if picks:
         r = picks[min(2, len(picks) - 1)]
         add("lump_above_knee.jpeg", z.read(f"BTXRD/images/{r['image_id']}"), "Lump above the knee", "thigh_knee",
-            "There is a hard, painful lump above my knee. What is it?", "BTXRD (CC BY 4.0)")
+            "There is a hard, painful lump above my knee. What is it?", "BTXRD (CC BY 4.0)", str(r["image_id"]))
 
     (out / "samples.json").write_text(json.dumps(items, indent=2))
     print(f"{len(items)} samples in {out}")

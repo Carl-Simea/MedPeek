@@ -1,8 +1,16 @@
-"""Talks to Gemma 4 through the local Ollama server."""
+"""Talks to Gemma 4.
+
+Two engines, same prompt and same JSON answer:
+- "google": Gemma 4 hosted by Google AI Studio (Gemini API). Fast (seconds). Used when an API key is set.
+- "ollama": the local Gemma 4 copy in this Codespace. Slow on CPU (minutes), but needs no key.
+  It is also the automatic backup if the hosted call fails.
+"""
 
 from __future__ import annotations
 
 import json
+import logging
+import re
 import time
 
 import httpx
@@ -10,30 +18,130 @@ import httpx
 from .config import settings
 from .prompts import OUTPUT_SCHEMA, SYSTEM_PROMPT
 
+log = logging.getLogger("medpeek.gemma")
+GOOGLE_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+
 
 class GemmaUnavailable(RuntimeError):
-    """Ollama is not running or the Gemma 4 model is not pulled."""
+    """The model couldn't be reached (no server, no key, timeout, quota)."""
 
 
 class GemmaBadOutput(RuntimeError):
     """Gemma answered, but not with valid JSON."""
 
 
-def status() -> dict:
-    """Is Ollama up, and is the Gemma 4 model available?"""
+def engine() -> str:
+    """Which engine the next request uses: mock, google or ollama."""
     if settings.mock_gemma:
-        return {"ollama": "mock", "model": settings.gemma_model, "model_ready": True}
+        return "mock"
+    if settings.gemma_provider == "google" or (settings.gemma_provider == "auto" and settings.google_api_key):
+        return "google"
+    return "ollama"
+
+
+def _ollama_status() -> dict:
     try:
         r = httpx.get(f"{settings.ollama_url}/api/tags", timeout=3.0)
         r.raise_for_status()
         names = {m.get("name") for m in r.json().get("models", [])}
-        return {"ollama": "up", "model": settings.gemma_model, "model_ready": settings.gemma_model in names}
+        return {"ollama": "up", "local_model": settings.gemma_model, "local_model_ready": settings.gemma_model in names}
     except Exception:
-        return {"ollama": "down", "model": settings.gemma_model, "model_ready": False}
+        return {"ollama": "down", "local_model": settings.gemma_model, "local_model_ready": False}
+
+
+def status() -> dict:
+    """Engine, model and readiness, for /api/health."""
+    current = engine()
+    if current == "mock":
+        return {"engine": "mock", "model": settings.gemma_model, "model_ready": True}
+    local = _ollama_status()
+    if current == "google":
+        return {"engine": "google", "model": settings.google_model, "model_ready": bool(settings.google_api_key), **local}
+    return {"engine": "ollama", "model": settings.gemma_model, "model_ready": local["local_model_ready"], **local}
 
 
 def analyze(user_prompt: str, images_b64: list[str]) -> tuple[dict, dict]:
-    """Send the prompt + images to Gemma 4. Returns (parsed_json, timing_info)."""
+    """Send the prompt + images to Gemma 4. Returns (parsed_json, info about the run)."""
+    if engine() == "google":
+        try:
+            return _google(user_prompt, images_b64)
+        except (GemmaUnavailable, GemmaBadOutput) as exc:
+            if not settings.fallback_to_local:
+                raise
+            log.warning("Hosted Gemma 4 failed (%s). Falling back to the local copy.", exc)
+    return _ollama(user_prompt, images_b64)
+
+
+def _parse_json(text: str) -> dict:
+    text = (text or "").strip()
+    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text)
+    start, end = text.find("{"), text.rfind("}")
+    if start == -1 or end <= start:
+        raise GemmaBadOutput("Gemma 4 returned an answer without JSON.")
+    try:
+        parsed = json.loads(text[start : end + 1])
+    except json.JSONDecodeError as exc:
+        raise GemmaBadOutput("Gemma 4 returned an answer that wasn't valid JSON.") from exc
+    if not isinstance(parsed, dict):
+        raise GemmaBadOutput("Gemma 4 returned JSON in an unexpected shape.")
+    return parsed
+
+
+def _google(user_prompt: str, images_b64: list[str]) -> tuple[dict, dict]:
+    if not settings.google_api_key:
+        raise GemmaUnavailable("No Google AI Studio API key is set (GEMINI_API_KEY).")
+    schema = json.dumps(OUTPUT_SCHEMA, separators=(",", ":"))
+    parts: list[dict] = [{"inline_data": {"mime_type": "image/png", "data": b64}} for b64 in images_b64]
+    parts.append(
+        {
+            "text": f"{user_prompt}\n\nReply with ONLY one JSON object, no markdown, that matches this JSON schema:\n{schema}"
+        }
+    )
+    body: dict = {
+        "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+        "contents": [{"role": "user", "parts": parts}],
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 2048, "thinkingConfig": {"thinkingLevel": "minimal"}},
+    }
+    url = GOOGLE_URL.format(model=settings.google_model)
+    headers = {"x-goog-api-key": settings.google_api_key}
+
+    started = time.monotonic()
+    r = _post(url, body, headers)
+    if r.status_code == 400 and "thinking" in r.text.lower():
+        body["generationConfig"].pop("thinkingConfig", None)  # older API versions don't know this field
+        r = _post(url, body, headers)
+    if r.status_code >= 400:
+        raise GemmaUnavailable(f"Google AI Studio error {r.status_code}: {r.text[:300]}")
+
+    data = r.json()
+    candidates = data.get("candidates") or []
+    text = "".join(
+        p.get("text", "")
+        for c in candidates[:1]
+        for p in (c.get("content") or {}).get("parts", [])
+        if not p.get("thought")
+    )
+    parsed = _parse_json(text)
+    usage = data.get("usageMetadata") or {}
+    return parsed, {
+        "engine": "google",
+        "model": settings.google_model,
+        "seconds": round(time.monotonic() - started, 1),
+        "prompt_tokens": usage.get("promptTokenCount"),
+        "output_tokens": usage.get("candidatesTokenCount"),
+    }
+
+
+def _post(url: str, body: dict, headers: dict) -> httpx.Response:
+    try:
+        return httpx.post(url, json=body, headers=headers, timeout=httpx.Timeout(settings.google_timeout, connect=10.0))
+    except httpx.TimeoutException as exc:
+        raise GemmaUnavailable("Google AI Studio took too long to answer.") from exc
+    except httpx.HTTPError as exc:
+        raise GemmaUnavailable(f"Couldn't reach Google AI Studio: {exc}") from exc
+
+
+def _ollama(user_prompt: str, images_b64: list[str]) -> tuple[dict, dict]:
     payload = {
         "model": settings.gemma_model,
         "stream": False,
@@ -68,26 +176,20 @@ def analyze(user_prompt: str, images_b64: list[str]) -> tuple[dict, dict]:
         raise GemmaUnavailable(f"Ollama error {r.status_code}: {r.text[:300]}")
 
     data = r.json()
-    content = (data.get("message") or {}).get("content", "")
-    try:
-        parsed = json.loads(content)
-    except json.JSONDecodeError as exc:
-        raise GemmaBadOutput("Gemma 4 returned an answer that wasn't valid JSON.") from exc
-    if not isinstance(parsed, dict):
-        raise GemmaBadOutput("Gemma 4 returned JSON in an unexpected shape.")
-
-    timing = {
+    parsed = _parse_json((data.get("message") or {}).get("content", ""))
+    return parsed, {
+        "engine": "ollama",
+        "model": settings.gemma_model,
         "seconds": round(time.monotonic() - started, 1),
         "prompt_tokens": data.get("prompt_eval_count"),
         "output_tokens": data.get("eval_count"),
     }
-    return parsed, timing
 
 
-def mock_answer(body_part: str, modality: str) -> dict:
+def mock_answer(body_part: str, modality: str) -> tuple[dict, dict]:
     """A realistic fake answer so the frontend team can build without Gemma running."""
     time.sleep(settings.mock_delay_seconds)
-    return {
+    answer = {
         "is_medical_image": True,
         "detected_body_part": body_part.replace("_", " "),
         "image_quality": "good",
@@ -104,18 +206,14 @@ def mock_answer(body_part: str, modality: str) -> dict:
                 "location": "Lower end of the forearm, near the wrist",
                 "explanation": "A thin dark line runs across the bone where it should look solid.",
                 "supported_by_reference_data": True,
-                "confidence": "moderate",
             },
             {
                 "finding": "Soft-tissue swelling",
                 "location": "Around the wrist",
                 "explanation": "The shadow of the skin and muscle looks thicker than usual, which often happens after an injury.",
                 "supported_by_reference_data": False,
-                "confidence": "low",
             },
         ],
-        "overall_confidence": "moderate",
-        "confidence_reason": "The break looks like the verified fracture cases, but small cracks are hard to judge on one view.",
         "urgency": "urgent",
         "referral": {
             "specialist": "Orthopedic surgeon (orthopedics)",
@@ -126,3 +224,4 @@ def mock_answer(body_part: str, modality: str) -> dict:
         "next_steps": ["Keep the wrist still and raised until your appointment.", "Use ice for 15 minutes at a time."],
         "questions_for_doctor": ["Do I need a cast or a splint?", "Will I need another X-ray to check healing?"],
     }
+    return answer, {"engine": "mock", "model": settings.gemma_model, "seconds": settings.mock_delay_seconds}

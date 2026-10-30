@@ -12,6 +12,7 @@ if(form){
  function showError(e){error.textContent=e.message;}
  async function load(){if(!chatId||loading)return;loading=true;try{const c=await api('/api/chats/'+encodeURIComponent(chatId));document.querySelector('#image-count').textContent=c.image_count+'/20 images';const sig=JSON.stringify(c.messages);if(sig!==signature){const nearBottom=windowEl.scrollHeight-windowEl.scrollTop-windowEl.clientHeight<100;signature=sig;messages.replaceChildren();if(c.messages.length)document.querySelector('#welcome')?.remove();for(const m of c.messages){const b=bubble(m.role,m.text);if(m.result)renderAnalysis(b.content,m.result,m.text);if(['sending','queued','running'].includes(m.status)){b.el.classList.add('pending');b.content.textContent=m.status==='sending'?'Sending image…':'The examiner is working on your image. This chat is saved; you can return later.';}if(m.status==='error')b.el.classList.add('error');}if(nearBottom)windowEl.scrollTop=windowEl.scrollHeight;}await list();}finally{loading=false;}}
  async function ensureChat(){if(!chatId){const c=await api('/api/chats',{method:'POST'});chatId=c.id;history.replaceState(null,'','/results?chat='+chatId);}}
+ document.querySelectorAll('[data-prompt]').forEach(button=>button.onclick=()=>{input.value=button.dataset.prompt;input.focus();input.dispatchEvent(new Event('input'));});
  document.querySelector('#attach').onclick=()=>files.click();
  files.onchange=()=>document.querySelector('#file-selection-text').textContent=Array.from(files.files).map(f=>f.name).join(' · ');
  input.oninput=()=>{input.style.height='auto';input.style.height=input.scrollHeight+'px';};
@@ -45,11 +46,11 @@ function renderAnalysis(container, result, fallback) {
  const referral=result.referral;
  if(referral?.required){const block=section('Who to follow up with');add(block,'h4',referral.specialist);if(referral.timeframe)add(block,'p',referral.timeframe);if(referral.reason)add(block,'p',referral.reason);}
  if(result.safety_notes?.length)list(section('Limitations to keep in mind'),result.safety_notes);
- const details=document.createElement('details');details.className='analysis-details';add(details,'summary','Confidence, references & questions for your doctor');
- add(details,'p',result.overall_confidence?'Reported confidence: '+result.overall_confidence:'Confidence was not provided.');
- if(result.confidence_reason)add(details,'p',result.confidence_reason);
+ const details=document.createElement('details');details.className='analysis-details';add(details,'summary','References & questions for your doctor');
+ if(result.coverage_note)add(details,'p',result.coverage_note);
  if(result.reference_comparison)add(details,'p',result.reference_comparison);
  if(result.questions_for_doctor?.length){add(details,'h4','Questions to bring to your appointment');list(details,result.questions_for_doctor);}
  container.append(details);
+ add(container,'div',result.ai_notice||'MedPeek is AI and can make mistakes.','analysis-alert');
  add(container,'p',result.disclaimer||'Educational information, not a diagnosis. Review findings with a healthcare professional.','analysis-disclaimer');
 }
