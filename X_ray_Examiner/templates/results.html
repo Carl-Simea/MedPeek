@@ -3,7 +3,7 @@
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Analysis Chat - X Ray Examiner</title>
+        <title>Analysis Chat - MedPeek</title>
         
         <script>
             const savedTheme = localStorage.getItem('theme') || 'light';
@@ -16,7 +16,7 @@
     <body class="d-flex flex-column vh-100">
         
         <header class="d-flex justify-content-between align-items-center px-4 py-3 border-bottom custom-header">
-            <div class="fw-semibold fs-5">X-Ray Examiner</div>
+            <a href="/" class="fw-bold fs-5 text-decoration-none" style="color: var(--text-main);">MedPeek</a>
             <div class="d-flex align-items-center">
                 <span class="text-muted small me-4">{{ image_count }}/20 Images</span>
                 <button id="theme-toggle" class="btn btn-sm btn-ghost me-2" type="button">🌓</button>
@@ -46,7 +46,7 @@
                             </svg>
                             AI Assistant
                         </div>
-                        <div class="message-text" style="line-height: 1.6;">{{ message.text }}</div>
+                        <div class="message-text" style="line-height: 1.6;">{{ message.text|safe }}</div>
                     </div>
                     {% endif %}
                 {% endfor %}
@@ -55,10 +55,14 @@
 
         <div class="w-100 pb-4 pt-2">
             <div class="mx-auto px-3" style="max-width: 800px;">
+                <div class="d-flex gap-2 mb-2 px-1 overflow-x-auto hide-scrollbar" style="white-space: nowrap;">
+                    <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill border-0 bg-transparent shadow-sm" onclick="setPrompt('Wrist after a fall')" style="background-color: var(--input-bg) !important;">Wrist after a fall</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill border-0 bg-transparent shadow-sm" onclick="setPrompt('Child with cough and fever')" style="background-color: var(--input-bg) !important;">Child with cough</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill border-0 bg-transparent shadow-sm" onclick="setPrompt('Thigh and knee: There is a hard, painful lump')" style="background-color: var(--input-bg) !important;">Lump above knee</button>
+                </div>
+
                 <form action="/results" method="POST" enctype="multipart/form-data">
                     <div class="input-group p-2 rounded-4 floating-input-container align-items-end">
-                        
-                        <!-- Using visually-hidden instead of d-none for accessibility -->
                         <input type="file" id="xray_upload" class="visually-hidden" name="xray_image" accept="image/*" multiple {% if image_count >= 20 %}disabled{% endif %}>
                         <label for="xray_upload" class="btn btn-ghost text-secondary border-0 d-flex align-items-center mb-1" style="cursor: pointer;" title="Attach X-ray" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' ') { document.getElementById('xray_upload').click(); event.preventDefault(); }">
                             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
@@ -66,8 +70,7 @@
                             </svg>
                         </label>
                         
-                        <!-- Auto-expanding textarea instead of single-line input -->
-                        <textarea class="form-control border-0 shadow-none bg-transparent chat-input py-2" name="user_message" placeholder="Message the AI..." rows="1" style="resize: none; overflow-y: hidden;" oninput="this.style.height = ''; this.style.height = this.scrollHeight + 'px'"></textarea>
+                        <textarea class="form-control border-0 shadow-none bg-transparent chat-input py-2" name="user_message" placeholder="Message MedPeek..." rows="1" style="resize: none; overflow-y: hidden;" oninput="this.style.height = ''; this.style.height = this.scrollHeight + 'px'"></textarea>
                         
                         <button class="btn btn-dark rounded-3 px-3 mb-1 d-flex align-items-center justify-content-center" type="submit" style="height: 36px;">
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">

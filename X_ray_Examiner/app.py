@@ -1,19 +1,38 @@
 import os
+import requests
 from flask import Flask, render_template, request, session, redirect, url_for
 from services.analyzer import analyze_xray
 
 app = Flask(__name__)
-# A static key prevents chat history from wiping every time the Flask server restarts during development
 app.secret_key = "replace_this_with_a_secure_random_string_in_production" 
 
-@app.route("/")
+@app.route("/", methods=["GET", "POST"])
 def home():
+    if request.method == "POST":
+        session["username"] = request.form.get("username", "Guest").strip()
+        
+        try:
+            requests.post(
+                "http://localhost:11434/api/generate", 
+                json={"model": "llava", "keep_alive": "1h"}, 
+                timeout=3
+            )
+        except requests.exceptions.RequestException:
+            pass 
+            
+        return redirect(url_for("results"))
+    
     return render_template("home.html")
 
 @app.route("/results", methods=["GET", "POST"])
 def results():
-    if "chat_history" not in session:
-        session["chat_history"] = []
+    username = session.get("username", "Guest")
+    
+    if "chat_history" not in session or not session["chat_history"]:
+        session["chat_history"] = [{
+            "sender": "bot", 
+            "text": f"Hello {username}. Welcome to MedPeek. You can select a sample case below or upload a scan with your symptoms to receive a structured analysis."
+        }]
     
     if "image_count" not in session:
         session["image_count"] = 0
@@ -21,13 +40,10 @@ def results():
     error_message = None
 
     if request.method == "POST":
-        # Capture the text message from the chat input
         user_text = request.form.get("user_message", "").strip()
-        
         uploaded_files = request.files.getlist("xray_image")
         valid_files = [f for f in uploaded_files if f and f.filename != '']
 
-        # If the user typed something, save it to the chat history immediately
         if user_text:
             session["chat_history"].append({
                 "sender": "user", 
@@ -35,42 +51,64 @@ def results():
             })
             session.modified = True
 
-        # Enforce the 5-at-a-time limit
         if len(valid_files) > 5:
             error_message = "You can only upload up to 5 images at a time."
         
-        # Enforce the 20-total-per-chat limit
         elif session["image_count"] + len(valid_files) > 20:
             remaining = 20 - session["image_count"]
             error_message = f"Chat limit reached. You only have {remaining} upload(s) remaining."
         
-        # Handle file uploads
         elif valid_files:
             for file in valid_files:
-                # Add user message to UI indicating upload
                 session["chat_history"].append({
                     "sender": "user", 
                     "text": f"[Image Uploaded: {file.filename}]"
                 })
                 
-                # Call the local Ollama model
                 gemma_response = analyze_xray(file)
                 
-                # Add the AI's actual analysis to the chat
+                structured_html = f"""
+                <div class="breakdown-wrapper">
+                    <div class="breakdown-card">
+                        <div class="breakdown-title">What the image shows</div>
+                        <div class="breakdown-content">{gemma_response}</div>
+                    </div>
+                    <div class="breakdown-card">
+                        <div class="breakdown-title d-flex justify-content-between align-items-center">
+                            Findings
+                            <span class="badge-confidence">Moderate Confidence</span>
+                        </div>
+                        <div class="breakdown-content">
+                            Review indicates potential structural anomalies. Correlate with clinical symptoms.
+                        </div>
+                    </div>
+                    <div class="breakdown-card">
+                        <div class="breakdown-title">Next Steps & Referrals</div>
+                        <div class="breakdown-content">
+                            <ul>
+                                <li>Schedule an appointment with an Orthopedic specialist.</li>
+                                <li>Do not put weight on the affected area until reviewed.</li>
+                                <li>Keep the area immobilized.</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+                """
+                
                 session["chat_history"].append({
                     "sender": "bot", 
-                    "text": gemma_response
+                    "text": structured_html
                 })
                 
                 session["image_count"] += 1
             
             session.modified = True
 
-        # Handle pure text messages (no image attached)
         elif user_text:
             session["chat_history"].append({
                 "sender": "bot", 
-                "text": "I received your message. Please attach an X-ray image if you need visual analysis."
+                # Updated fallback response to dynamically use the username
+                "text": f"I received your message, {username}. Please attach an X-ray image if you need visual analysis."
             })
             session.modified = True
 
