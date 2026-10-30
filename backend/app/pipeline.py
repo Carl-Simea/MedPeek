@@ -57,6 +57,8 @@ def run_analysis(
         "references_used": [c.public() for c in refs],
         "reference_library_size": sum(n for _, n in covered),
         "body_part_detected_by": detected_by,
+        "image_info": {"format": image.source_format, "width": image.width, "height": image.height},
+        "privacy_note": gemma.privacy_note(),
         "engine": info.get("engine", ""),
         "model": info.get("model", settings.gemma_model),
         "mock": settings.mock_gemma,

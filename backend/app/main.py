@@ -17,7 +17,8 @@ from typing import Optional
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
+from pydantic import BaseModel, Field
 from fastapi.staticfiles import StaticFiles
 
 from . import gemma
@@ -27,6 +28,7 @@ from .imaging import ImageError, prepare_image, thumbnail_vector
 from .jobs import JobQueue
 from .pipeline import run_analysis
 from .references import ReferenceLibrary
+from .report_pdf import build_pdf, verification_code
 from .schemas import AnalysisResult, JobStatus, Options, ReferenceUsed
 
 VERSION = "1.1.0"
@@ -138,7 +140,87 @@ def options() -> dict:
             {"id": key, "label": info["label"], "reference_cases": library.count(key)} for key, info in BODY_PARTS.items()
         ],
         "modalities": [{"id": key, "label": info["label"]} for key, info in MODALITIES.items()],
+        "privacy_note": gemma.privacy_note(),
     }
+
+
+@app.get("/api/privacy", tags=["status"])
+def privacy() -> dict:
+    """The privacy line to show near the upload button."""
+    return {"privacy_note": gemma.privacy_note(), "engine": gemma.engine()}
+
+
+def _pdf_response(result: dict) -> Response:
+    if not isinstance(result, dict) or not result.get("summary"):
+        raise HTTPException(422, "Send the finished analysis result (the JSON from /api/jobs/{job_id}).")
+    pdf = build_pdf(result, privacy_note=gemma.privacy_note())
+    name = f"MedPeek-report-{result.get('id', 'report')}.pdf"
+    return Response(pdf, media_type="application/pdf", headers={
+        "Content-Disposition": f'attachment; filename="{name}"',
+        "X-Verification-Code": verification_code(result),
+    })
+
+
+@app.post("/api/report/pdf", tags=["reports"], response_class=Response)
+async def report_pdf(request: Request) -> Response:
+    """Turn a finished analysis (the `result` JSON) into a PDF the patient can bring to their doctor."""
+    try:
+        result = await request.json()
+    except ValueError as exc:
+        raise HTTPException(422, "Send the analysis result as JSON.") from exc
+    return _pdf_response(result)
+
+
+@app.get("/api/jobs/{job_id}/pdf", tags=["reports"], response_class=Response)
+def job_pdf(job_id: str) -> Response:
+    """PDF for a finished job (works while the server keeps the job in memory)."""
+    job = jobs.get(job_id)
+    if job is None or job["status"] != "done":
+        raise HTTPException(404, "That report isn't available. Use POST /api/report/pdf with the result instead.")
+    return _pdf_response(job["result"])
+
+
+class Feedback(BaseModel):
+    kind: str = Field("mistake", description="mistake (wrong report), bug or issue")
+    message: str = Field(..., min_length=3, max_length=2000)
+    report_id: str = Field("", max_length=64)
+    contact: str = Field("", max_length=200, description="Optional email if you want a reply")
+    page: str = Field("", max_length=200)
+
+
+FEEDBACK_FILE = settings.reference_dir.parent / "feedback" / "feedback.jsonl"
+_feedback_times: dict[str, deque] = defaultdict(deque)
+
+
+@app.post("/api/feedback", tags=["feedback"], status_code=201)
+def send_feedback(item: Feedback, request: Request) -> dict:
+    """Report a mistake in a report, a bug or any other issue. Saved on the server for the team to review."""
+    now, window = time.monotonic(), _feedback_times[_client_ip(request)]
+    while window and now - window[0] > 60:
+        window.popleft()
+    if len(window) >= 10:
+        raise HTTPException(429, "Too many reports in a minute. Please wait a moment.")
+    window.append(now)
+    kind = item.kind.lower() if item.kind.lower() in ("mistake", "bug", "issue") else "issue"
+    ticket = "FB-" + uuid.uuid4().hex[:6].upper()
+    record = {"ticket": ticket, "kind": kind, "message": item.message.strip(), "report_id": item.report_id,
+              "contact": item.contact.strip(), "page": item.page, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    FEEDBACK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with FEEDBACK_FILE.open("a") as fh:
+        fh.write(json.dumps(record) + "\n")
+    log.info("feedback %s (%s) for report %s", ticket, kind, item.report_id or "-")
+    return {"ok": True, "ticket": ticket, "message": "Thanks! The MedPeek team will look at this."}
+
+
+@app.get("/api/feedback", tags=["feedback"])
+def list_feedback(x_admin_token: Optional[str] = Header(None)) -> dict:
+    """The latest 100 reports (team only: needs X-Admin-Token)."""
+    if not settings.admin_token or not x_admin_token or not hmac.compare_digest(x_admin_token, settings.admin_token):
+        raise HTTPException(401, "Missing or wrong X-Admin-Token.")
+    if not FEEDBACK_FILE.exists():
+        return {"items": []}
+    lines = FEEDBACK_FILE.read_text().splitlines()[-100:]
+    return {"items": [json.loads(line) for line in reversed(lines) if line.strip()]}
 
 
 @app.post(
