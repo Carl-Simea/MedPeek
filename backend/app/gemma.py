@@ -85,30 +85,40 @@ def mock_answer(body_part: str, modality: str) -> dict:
     time.sleep(settings.mock_delay_seconds)
     return {
         "is_medical_image": True,
-        "detected_body_part": body_part,
+        "detected_body_part": body_part.replace("_", " "),
         "image_quality": "good",
+        "primary_condition": "fracture",
+        "condition_in_reference_data": True,
         "summary": (
-            "This is a mock answer for frontend testing. The bones line up normally and there is no clear break. "
-            "The joint space looks even on both sides."
+            "This is a mock answer for frontend testing. There appears to be a thin break across the end of the "
+            "radius, the larger forearm bone, just above the wrist. The bone pieces still line up well, which "
+            "usually means it can heal in a cast. An orthopedic doctor should confirm this and decide on treatment."
         ),
         "findings": [
             {
-                "finding": "No clear fracture",
-                "location": "Main bones in view",
+                "finding": "Possible break (fracture) of the distal radius",
+                "location": "Lower end of the forearm, near the wrist",
+                "explanation": "A thin dark line runs across the bone where it should look solid.",
+                "supported_by_reference_data": True,
                 "confidence": "moderate",
-                "explanation": "The outer edges of the bones look smooth and unbroken.",
             },
             {
-                "finding": "Mild soft-tissue swelling",
-                "location": "Around the joint",
+                "finding": "Soft-tissue swelling",
+                "location": "Around the wrist",
+                "explanation": "The shadow of the skin and muscle looks thicker than usual, which often happens after an injury.",
+                "supported_by_reference_data": False,
                 "confidence": "low",
-                "explanation": "The skin and muscle shadow looks slightly thicker than usual, which can happen after an injury.",
             },
         ],
         "overall_confidence": "moderate",
-        "confidence_reason": "The image is clear, but small cracks can be hard to see on a single view.",
-        "urgency": "soon",
-        "reference_comparison": "The image looks closer to the normal reference case than to the abnormal one.",
-        "next_steps": ["Ask your doctor for the radiologist's official report.", "Rest and ice the area until your appointment."],
-        "questions_for_doctor": ["Do I need another view or an MRI?", "When can I go back to normal activity?"],
+        "confidence_reason": "The break looks like the verified fracture cases, but small cracks are hard to judge on one view.",
+        "urgency": "urgent",
+        "referral": {
+            "specialist": "Orthopedic surgeon (orthopedics)",
+            "reason": "Orthopedic surgeons treat broken bones and decide whether a cast or surgery is needed.",
+            "timeframe": "Within 1-2 days",
+        },
+        "reference_comparison": "The image looks closest to the verified fracture case and differs from the normal case.",
+        "next_steps": ["Keep the wrist still and raised until your appointment.", "Use ice for 15 minutes at a time."],
+        "questions_for_doctor": ["Do I need a cast or a splint?", "Will I need another X-ray to check healing?"],
     }

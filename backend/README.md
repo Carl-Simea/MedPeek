@@ -2,11 +2,18 @@
 
 A patient uploads an X-ray, MRI or CT image. The backend:
 
-1. Cleans the image (JPG, PNG, WEBP or DICOM; metadata like names and IDs is stripped).
-2. Pulls **verified reference cases** for the same body part and imaging type from the reference library.
-3. Asks **Gemma 4** (running locally through Ollama, in this Codespace) to compare the patient's image with those cases.
-4. Applies safety rules: confidence is lowered when the image is unclear or there are no reference cases, urgent signs get a clear "get care now" notice, and every answer tells the patient to confirm with their doctor.
-5. Returns plain-language JSON for the frontend to display.
+1. Cleans the image (JPG, PNG, WEBP or DICOM; names, IDs and other metadata are stripped).
+2. Finds the most similar **verified reference cases** for the same body part (open, labeled datasets; see below).
+3. Asks **Gemma 4** (running locally through Ollama, in this Codespace) to read the image against those cases
+   and against the list of conditions our verified data covers for that body part.
+4. Applies safety rules on the server:
+   - **Confidence is only shown when the condition is covered by our verified data.** Otherwise `overall_confidence`
+     and each finding's `confidence` are `null`, and the answer says so.
+   - **Every answer names the kind of doctor to see** (`referral.specialist`, e.g. "Orthopedic surgeon (orthopedics)",
+     "Orthopedic oncologist", "Pulmonologist (lung doctor)"). `referral.required` is `true` when the condition isn't
+     covered by our data, when something abnormal was found, or when it's urgent.
+   - Emergencies point to the emergency department, with a "call 911" notice.
+5. Returns plain-language JSON for the frontend.
 
 It explains images for patients. It does not diagnose.
 
@@ -17,9 +24,9 @@ bash ~/start-gemma.sh        # starts Ollama + Gemma 4 (runs automatically in ne
 cd backend && ./run.sh       # API on port 8000
 ```
 
-Then open the forwarded port 8000 (Ports tab) and go to `/docs` for an interactive page where you can try every endpoint.
+Open the forwarded port 8000 (Ports tab) and go to `/docs` to try every endpoint.
 
-**Frontend team, no Gemma needed:** `MOCK_GEMMA=1 ./run.sh` returns realistic fake answers in 2 seconds.
+**Frontend team, no Gemma needed:** `MOCK_GEMMA=1 ./run.sh` returns a realistic fake answer in 2 seconds.
 
 Tests: `cd backend && .venv/bin/python -m pytest -q`
 
@@ -28,62 +35,75 @@ Tests: `cd backend && .venv/bin/python -m pytest -q`
 Base URL: the forwarded port 8000 URL (or `http://localhost:8000`). CORS is open.
 
 ### `GET /api/options`
-Body parts and imaging types for the dropdowns, with how many reference cases exist for each.
+Body parts and imaging types for the dropdowns, with how many verified cases exist for each.
 
 ```json
-{"body_parts": [{"id": "chest", "label": "Chest / lungs", "reference_cases": 12}, ...],
+{"body_parts": [{"id": "chest_adult", "label": "Chest (adults)", "reference_cases": 428}, ...],
  "modalities": [{"id": "xray", "label": "X-ray"}, {"id": "mri", "label": "MRI"}, {"id": "ct", "label": "CT scan"}]}
 ```
+
+Body part ids: `skull_face_sinuses`, `teeth_jaw`, `neck_cervical_spine`, `chest_adult`, `chest_child`, `breast`,
+`back_spine`, `abdomen_kidneys`, `pelvis_hip`, `shoulder_upper_arm`, `elbow_forearm`, `wrist_hand`, `thigh_knee`,
+`lower_leg_foot`, `whole_body`. Plain words also work (`knee`, `wrist`, `chest`, `lumbar_spine`, `other`).
 
 ### `POST /api/analyze` (multipart form)
 
 | field | required | example |
 | --- | --- | --- |
 | `image` | yes | the file (JPG, PNG, WEBP or .dcm, max 25 MB) |
-| `body_part` | yes | `chest`, `knee`, `wrist`, `lumbar_spine` ... (ids from `/api/options`) |
+| `body_part` | yes | an id from `/api/options` |
 | `modality` | no (default `xray`) | `xray`, `mri`, `ct` |
 | `question` | no | "Is my wrist broken?" |
 
 Returns `202 {"job_id": "...", "status": "queued", "poll_url": "/api/jobs/<id>"}` right away.
-Gemma 4 runs on CPU, so a result takes about 1-3 minutes.
+Gemma 4 runs on CPU, so a result takes about **2-4 minutes**. Jobs run one at a time; `position_in_queue` says where you are.
 
 ### `GET /api/jobs/{job_id}`
-Poll every 3 seconds. `status` goes `queued` -> `running` -> `done` (or `error`).
+Poll every 3-5 seconds. `status` goes `queued` -> `running` -> `done` (or `error`).
 
 ```json
 {
-  "job_id": "1cbeea059e39",
-  "status": "done",
-  "position_in_queue": null,
-  "elapsed_seconds": 74.2,
-  "error": null,
+  "job_id": "1cbeea059e39", "status": "done", "position_in_queue": null, "elapsed_seconds": 142.0, "error": null,
   "result": {
-    "body_part": "wrist", "body_part_label": "Wrist", "modality": "xray", "modality_label": "X-ray",
+    "body_part": "wrist_hand", "body_part_label": "Wrist, hand and fingers", "modality": "xray", "modality_label": "X-ray",
     "question": "Is my wrist broken?",
-    "is_medical_image": true,
-    "image_quality": "good",
-    "summary": "Plain-language 2-4 sentence explanation...",
+    "is_medical_image": true, "image_quality": "good",
+    "primary_condition": "fracture",
+    "condition_in_reference_data": true,
+    "summary": "Plain-language explanation for the patient...",
     "findings": [
-      {"finding": "Possible break in the radius", "location": "Near the wrist joint",
-       "confidence": "moderate", "explanation": "There is a thin dark line across the bone..."}
+      {"finding": "Possible break of the distal radius", "location": "Near the wrist",
+       "explanation": "A thin dark line runs across the bone...",
+       "supported_by_reference_data": true, "confidence": "moderate"},
+      {"finding": "Soft-tissue swelling", "location": "Around the wrist", "explanation": "...",
+       "supported_by_reference_data": false, "confidence": null}
     ],
     "overall_confidence": "moderate",
-    "confidence_reason": "Why the model is or isn't sure",
+    "confidence_reason": "Why the model is or isn't sure (or why no confidence is given)",
     "urgency": "urgent",
-    "urgency_notice": "Contact your doctor within the next day or two to go over this image.",
+    "urgency_notice": "Contact a doctor within the next day or two to go over this image.",
+    "referral": {"specialist": "Orthopedic surgeon (orthopedics)",
+                 "reason": "Orthopedic surgeons treat broken bones...", "timeframe": "Within 1-2 days", "required": true},
     "reference_comparison": "How it compares with the verified cases",
-    "next_steps": ["..."],
+    "next_steps": ["See a orthopedic surgeon (within 1-2 days).", "..."],
     "questions_for_doctor": ["..."],
-    "references_used": [{"case_id": "...", "label": "abnormal", "diagnosis": "distal radius fracture", "source": "..."}],
-    "safety_notes": ["Image quality is limited, so confidence was lowered."],
-    "disclaimer": "This explanation was generated by an AI model (Gemma 4)... not a diagnosis...",
-    "model": "gemma4:latest", "mock": false, "processing_seconds": 73.9
+    "references_used": [{"case_id": "...", "label": "abnormal", "diagnosis": "fracture", "source": "FracAtlas",
+                         "verified_by": "Expert-annotated fracture labels (FracAtlas, Scientific Data 2023)"}],
+    "reference_library_size": 154,
+    "safety_notes": ["..."],
+    "disclaimer": "This explanation was generated by an AI model (Gemma 4)... It is not a diagnosis...",
+    "model": "gemma4:latest", "mock": false, "processing_seconds": 141.6
   }
 }
 ```
 
-Display tips: always show `disclaimer`; show `urgency_notice` in a red banner when it isn't null;
-color `overall_confidence` (high / moderate / low); list `safety_notes` under the result.
+Display tips:
+- Always show `summary`, the `referral` card and `disclaimer`. Highlight the referral when `referral.required` is true.
+- Show `urgency_notice` in a red banner when it isn't `null`.
+- Show `overall_confidence` (high / moderate / low) **only when it isn't `null`**. When it's `null`, show
+  `confidence_reason` instead (e.g. "Not given: this isn't well covered by our verified data. Please see a ...").
+- Same for each finding's `confidence`.
+- List `safety_notes` under the result; `references_used` can go in a "Compared with" section.
 
 ### JavaScript example
 
@@ -98,7 +118,7 @@ async function analyze(file, bodyPart, modality, question) {
   form.append("question", question);
   const { job_id } = await (await fetch(`${API}/api/analyze`, { method: "POST", body: form })).json();
   while (true) {
-    await new Promise((r) => setTimeout(r, 3000));
+    await new Promise((r) => setTimeout(r, 4000));
     const job = await (await fetch(`${API}/api/jobs/${job_id}`)).json();
     if (job.status === "done") return job.result;
     if (job.status === "error") throw new Error(job.error);
@@ -109,30 +129,47 @@ async function analyze(file, bodyPart, modality, question) {
 If the frontend lives in `frontend/` (or a built `frontend/dist/`) in this repo, the backend serves it at `/`,
 so the whole app runs from one URL and `API` can be `""`.
 
-## Reference library ("training data")
+## Reference library (the verified data Gemma checks first)
 
-Gemma 4 isn't retrained (that needs GPUs). Instead, verified cases are stored here and shown to Gemma
-as examples before every answer. Each case = one image + its verified report + body part + imaging type
-+ label (`normal` / `abnormal`) + source.
+Gemma 4 isn't retrained (that needs GPUs). Instead, every answer is grounded in verified cases: the most
+similar abnormal and normal case for that body part are shown to Gemma (image + verified label/report), along
+with the list of conditions our data covers. If the patient's condition isn't on that list, no confidence is
+given and the patient is referred to the right specialist.
 
-The library lives in `backend/data/reference/`, which is **git-ignored**: patient images and reports must never be pushed to this public repo.
-
-Add cases in bulk (images with same-name `.txt`/`.pdf` reports next to them):
+Build it (every source file is under 1 GB; the script checks before downloading):
 
 ```bash
 cd backend
-.venv/bin/python scripts/import_references.py /path/to/knee_fractures --body-part knee --modality xray \
-    --label abnormal --source "Example Imaging Lab"
+.venv/bin/python scripts/build_reference_library.py --dry-run   # see what would be added
+.venv/bin/python scripts/build_reference_library.py --clean     # build (about 5-10 minutes)
+curl -X POST -H "X-Admin-Token: $ADMIN_TOKEN" localhost:8000/api/references/reload   # or restart the API
 ```
 
-Or with a CSV manifest (`image,report,body_part,modality,label,diagnosis,source,verified_by`):
+| Source | What it adds | Size | License |
+| --- | --- | --- | --- |
+| FracAtlas | fracture / no fracture: hand-wrist, leg, hip, shoulder | 0.34 GB | CC BY 4.0 |
+| OrthoFrac-XR | fractures, healing fractures, malunion, normal: arm, leg, hip, wrist | 0.52 GB | CC BY 4.0 |
+| BTXRD | benign and malignant bone tumors vs. no tumor, by location | 0.84 GB | CC BY 4.0 |
+| BDCXR-3257 | children's chest: normal, bacterial and viral pneumonia | 0.92 GB | CC BY 4.0 |
+| Indiana University chest X-rays (test shard) | adult chest images with real radiologist reports | 0.14 GB | CC BY-NC-ND 4.0 |
+| ROCOv2 (validation + test images) | X-rays from published case reports with author captions (skull, teeth, spine, abdomen and more) | 0.86 + 0.86 GB | CC BY-NC 4.0 |
+| Mammo-MX (BI-RADS 0 and 6 sets) | mammograms: biopsy-proven cancer, "needs more imaging" | 0.12 + 0.40 GB | CC BY 4.0 |
+
+Known gaps: neck, skull/face and back have few cases (published case reports only); there are no normal
+mammograms under 1 GB; MRI and CT have no verified cases yet, so those answers never show a confidence level.
+
+The library lives in `backend/data/reference/`, which is **git-ignored**: medical images and reports are never
+pushed to this public repo. `backend/data/reference/library_summary.json` lists what's inside.
+
+Add your own verified cases (images with same-name `.txt`/`.pdf` reports next to them):
 
 ```bash
-.venv/bin/python scripts/import_references.py --csv /path/to/manifest.csv
+.venv/bin/python scripts/import_references.py /path/to/knee_fractures --body-part thigh_knee --modality xray \
+    --label abnormal --diagnosis fracture --source "Example Imaging Lab"
+.venv/bin/python scripts/import_references.py --csv /path/to/manifest.csv   # image,report,body_part,modality,label,diagnosis,source,verified_by
 ```
 
-Or one at a time through `POST /api/references` (needs header `X-Admin-Token`, set `ADMIN_TOKEN` in `backend/.env`).
-After a bulk import, call `POST /api/references/reload` (same header) or restart the API.
+Or one at a time through `POST /api/references` (header `X-Admin-Token`, set `ADMIN_TOKEN` in `backend/.env`).
 
 ## Settings (`backend/.env`)
 

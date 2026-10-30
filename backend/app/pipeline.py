@@ -1,4 +1,4 @@
-"""One analysis, end to end: references -> prompt -> Gemma 4 -> guardrails."""
+"""One analysis, end to end: similar verified cases -> prompt -> Gemma 4 -> safety rules."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from . import gemma
 from .body_parts import body_part_label, modality_label
 from .config import settings
-from .imaging import PreparedImage
+from .imaging import PreparedImage, thumbnail_vector
 from .prompts import build_user_prompt
 from .references import ReferenceLibrary
 from .safety import finalize
@@ -24,7 +24,8 @@ def run_analysis(
     library: ReferenceLibrary,
 ) -> dict:
     started = time.monotonic()
-    refs = library.retrieve(body_part, modality, settings.max_reference_cases)
+    refs = library.retrieve(body_part, modality, settings.max_reference_cases, query_vector=thumbnail_vector(image.png_bytes))
+    covered = library.conditions(body_part, modality)
 
     if settings.mock_gemma:
         raw = gemma.mock_answer(body_part, modality)
@@ -38,6 +39,8 @@ def run_analysis(
             question=question,
             references=refs,
             reference_images_attached=attach,
+            covered_conditions=covered,
+            sources=library.sources(body_part, modality),
         )
         raw, _timing = gemma.analyze(prompt, images)
 
@@ -51,6 +54,7 @@ def run_analysis(
         "question": question,
         **final,
         "references_used": [c.public() for c in refs],
+        "reference_library_size": sum(n for _, n in covered),
         "model": settings.gemma_model,
         "mock": settings.mock_gemma,
         "processing_seconds": round(time.monotonic() - started, 1),

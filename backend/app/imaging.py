@@ -77,6 +77,29 @@ def _dicom_to_image(data: bytes) -> Image.Image:
     return Image.fromarray(arr)
 
 
+def _high_bit_depth_to_l(img: Image.Image) -> Image.Image:
+    import numpy as np
+
+    arr = np.asarray(img, dtype="float64")
+    lo, hi = float(np.percentile(arr, 0.5)), float(np.percentile(arr, 99.5))
+    if hi <= lo:
+        lo, hi = float(arr.min()), float(arr.max()) or 1.0
+    arr = np.clip((arr - lo) / (hi - lo), 0, 1) * 255.0
+    return Image.fromarray(arr.astype("uint8"), mode="L")
+
+
+def thumbnail_vector(png_bytes: bytes, size: int = 32):
+    """A small, normalized picture fingerprint used to find visually similar reference cases."""
+    import numpy as np
+
+    img = Image.open(io.BytesIO(png_bytes)).convert("L")
+    img = ImageOps.equalize(img.resize((size, size), Image.BILINEAR))
+    v = np.asarray(img, dtype="float32").ravel()
+    v -= v.mean()
+    n = float(np.linalg.norm(v))
+    return v / n if n else v
+
+
 def prepare_image(data: bytes, filename: str = "", max_side: int = 1024) -> PreparedImage:
     if not data:
         raise ImageError("The uploaded file is empty.")
@@ -93,6 +116,8 @@ def prepare_image(data: bytes, filename: str = "", max_side: int = 1024) -> Prep
         source_format = img.format or "image"
         img = ImageOps.exif_transpose(img)
 
+    if img.mode in ("I;16", "I;16B", "I;16L", "I", "F"):
+        img = _high_bit_depth_to_l(img)  # 12/16-bit X-rays would otherwise turn white
     if img.mode not in ("L", "RGB"):
         img = img.convert("RGB") if img.mode in ("RGBA", "P", "CMYK", "LA") else img.convert("L")
     if img.width < 64 or img.height < 64:

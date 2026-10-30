@@ -6,18 +6,23 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from app.imaging import ImageError, prepare_image
-from app.main import app, library
+from app.imaging import ImageError, prepare_image, thumbnail_vector
+from app.main import app
 from app.prompts import build_user_prompt
+from app.references import ReferenceCase, ReferenceLibrary
 from app.safety import finalize
 
 client = TestClient(app)
 ADMIN = {"X-Admin-Token": "test-token"}
 
 
-def png_bytes(size=(256, 256), color=128) -> bytes:
+def png_bytes(size=(256, 256), color=128, pattern=False) -> bytes:
     buf = io.BytesIO()
-    Image.new("L", size, color).save(buf, format="PNG")
+    if pattern:
+        arr = (np.indices(size).sum(axis=0) % 64 * 4).astype("uint8")
+        Image.fromarray(arr, "L").save(buf, format="PNG")
+    else:
+        Image.new("L", size, color).save(buf, format="PNG")
     return buf.getvalue()
 
 
@@ -26,31 +31,29 @@ def test_health_and_options():
     assert h["status"] == "ok" and h["mock"] is True
     opts = client.get("/api/options").json()
     ids = {b["id"] for b in opts["body_parts"]}
-    assert {"chest", "knee", "wrist", "lumbar_spine"} <= ids
+    assert {"chest_adult", "chest_child", "wrist_hand", "thigh_knee", "teeth_jaw", "breast"} <= ids
+    assert len(ids) == 15
     assert {m["id"] for m in opts["modalities"]} == {"xray", "mri", "ct"}
 
 
-def test_analyze_wait_returns_result_with_guardrails():
+def test_analyze_wait_without_references_hides_confidence_and_refers():
     r = client.post(
         "/api/analyze?wait=true",
         files={"image": ("knee.png", png_bytes(), "image/png")},
-        data={"body_part": "Knee", "modality": "x-ray", "question": "Is it broken?"},
+        data={"body_part": "knee", "modality": "x-ray", "question": "Is it broken?"},
     )
     assert r.status_code == 200, r.text
     res = r.json()
-    assert res["body_part"] == "knee" and res["modality"] == "xray"
+    assert res["body_part"] == "thigh_knee" and res["modality"] == "xray"
+    assert res["overall_confidence"] is None  # no verified data -> no confidence
+    assert all(f["confidence"] is None for f in res["findings"])
+    assert res["referral"]["required"] is True
+    assert res["referral"]["specialist"]
     assert res["disclaimer"] and res["summary"]
-    assert res["overall_confidence"] in ("moderate", "low")  # no references -> capped
-    assert any("doctor" in s.lower() for s in res["next_steps"])
-    assert res["references_used"] == []
 
 
 def test_analyze_job_polling():
-    r = client.post(
-        "/api/analyze",
-        files={"image": ("wrist.jpg", png_bytes(), "image/png")},
-        data={"body_part": "wrist"},
-    )
+    r = client.post("/api/analyze", files={"image": ("w.jpg", png_bytes(), "image/png")}, data={"body_part": "wrist"})
     assert r.status_code == 202
     job_id = r.json()["job_id"]
     for _ in range(50):
@@ -59,7 +62,7 @@ def test_analyze_job_polling():
             break
         time.sleep(0.1)
     assert job["status"] == "done"
-    assert job["result"]["body_part"] == "wrist"
+    assert job["result"]["body_part"] == "wrist_hand"
 
 
 def test_bad_inputs():
@@ -70,71 +73,97 @@ def test_bad_inputs():
     assert client.get("/api/jobs/nope").status_code == 404
 
 
-def test_reference_library_flow():
+def test_reference_library_flow_shows_confidence_when_covered():
     files = {"image": ("ref.png", png_bytes(color=90), "image/png")}
-    data = {"body_part": "knee", "modality": "xray", "report": "No fracture. Joint spaces preserved.", "label": "normal"}
+    data = {"body_part": "wrist", "modality": "xray", "report": "Distal radius fracture.", "label": "abnormal",
+            "diagnosis": "fracture", "source": "FracAtlas"}
     assert client.post("/api/references", files=files, data=data).status_code == 401
     r = client.post("/api/references", files=files, data=data, headers=ADMIN)
     assert r.status_code == 201, r.text
-    assert "report" not in r.json()
-    assert client.get("/api/references/stats").json()["by_body_part"]["knee"]["xray"]["normal"] >= 1
+    assert "report" not in r.json() and "vector" not in r.json()
+    assert client.get("/api/references/stats").json()["by_body_part"]["wrist_hand"]["xray"]["abnormal"] >= 1
 
     res = client.post(
         "/api/analyze?wait=true",
-        files={"image": ("knee.png", png_bytes(), "image/png")},
-        data={"body_part": "knee", "modality": "xray"},
+        files={"image": ("wrist.png", png_bytes(), "image/png")},
+        data={"body_part": "wrist", "modality": "xray"},
     ).json()
     assert len(res["references_used"]) == 1
-    assert res["references_used"][0]["label"] == "normal"
+    assert res["overall_confidence"] == "moderate"  # mock says supported, and data exists
+    assert res["findings"][0]["confidence"] == "moderate"
+    assert res["findings"][1]["confidence"] is None  # that finding isn't backed by the data
+    assert res["referral"]["specialist"].startswith("Orthopedic")
 
 
-def test_retrieval_prefers_normal_and_abnormal_pair(tmp_path):
-    from app.references import ReferenceLibrary
-
+def test_retrieval_uses_similarity_and_label_pair(tmp_path):
     lib = ReferenceLibrary(tmp_path)
-    for i, label in enumerate(["normal", "normal", "abnormal"]):
-        lib.add_case(image_bytes=png_bytes(color=50 + i), filename=f"c{i}.png", body_part="chest",
-                     modality="xray", report=f"report {i}", label=label)
-    picked = lib.retrieve("chest", "xray", 2)
-    assert sorted(c.label for c in picked) == ["abnormal", "normal"]
-    assert lib.retrieve("knee", "xray", 2) == []
+    lib.add_case(image_bytes=png_bytes(pattern=True), filename="a.png", body_part="chest_adult", modality="xray",
+                 report="r", label="abnormal", diagnosis="pneumonia", reload=False)
+    lib.add_case(image_bytes=png_bytes(color=30), filename="b.png", body_part="chest_adult", modality="xray",
+                 report="r", label="abnormal", diagnosis="effusion", reload=False)
+    lib.add_case(image_bytes=png_bytes(color=200), filename="c.png", body_part="chest_adult", modality="xray",
+                 report="r", label="normal", reload=True)
+    q = thumbnail_vector(png_bytes(pattern=True))
+    picked = lib.retrieve("chest_adult", "xray", 2, query_vector=q)
+    assert [c.label for c in picked] == ["abnormal", "normal"]
+    assert picked[0].diagnosis == "pneumonia"  # the look-alike wins
+    assert dict(lib.conditions("chest_adult", "xray"))["normal (no abnormality)"] == 1
+    assert lib.retrieve("thigh_knee", "xray", 2, query_vector=q) == []
+
+
+def _raw(**over):
+    base = {
+        "is_medical_image": True, "detected_body_part": "chest", "image_quality": "good",
+        "primary_condition": "pneumonia", "condition_in_reference_data": True, "summary": "s",
+        "findings": [{"finding": "f", "location": "l", "explanation": "e", "supported_by_reference_data": True,
+                      "confidence": "high"}],
+        "overall_confidence": "high", "confidence_reason": "r", "urgency": "urgent",
+        "referral": {"specialist": "Pulmonologist (lung doctor)", "reason": "lungs", "timeframe": "1-2 days"},
+        "reference_comparison": "", "next_steps": [], "questions_for_doctor": [],
+    }
+    base.update(over)
+    return base
 
 
 def test_finalize_rules():
-    base = {
-        "is_medical_image": True, "detected_body_part": "chest", "image_quality": "good", "summary": "s",
-        "findings": [{"finding": "f", "location": "l", "confidence": "high", "explanation": "e"}],
-        "overall_confidence": "high", "confidence_reason": "r", "urgency": "emergency",
-        "reference_comparison": "", "next_steps": [], "questions_for_doctor": [],
-    }
-    out = finalize(base, body_part="chest", modality="xray", references_used=2)
+    out = finalize(_raw(), body_part="chest_adult", modality="xray", references_used=2)
     assert out["overall_confidence"] == "high" and out["urgency_notice"]
-    assert any("doctor" in s.lower() for s in out["next_steps"])
+    assert out["referral"]["specialist"] == "Pulmonologist (lung doctor)" and out["referral"]["required"]
 
-    out = finalize({**base, "image_quality": "limited"}, body_part="chest", modality="xray", references_used=2)
-    assert out["overall_confidence"] == "moderate" and out["findings"][0]["confidence"] == "moderate"
+    out = finalize(_raw(condition_in_reference_data=False), body_part="chest_adult", modality="xray", references_used=2)
+    assert out["overall_confidence"] is None and out["findings"][0]["confidence"] is None
+    assert out["referral"]["required"] and "not" in out["confidence_reason"].lower()
 
-    out = finalize({**base, "is_medical_image": False}, body_part="chest", modality="xray", references_used=2)
-    assert out["overall_confidence"] == "low" and out["findings"] == [] and out["urgency"] == "routine"
+    out = finalize(_raw(image_quality="limited"), body_part="chest_adult", modality="xray", references_used=2)
+    assert out["overall_confidence"] == "moderate"
 
-    out = finalize({**base, "detected_body_part": "left knee"}, body_part="chest", modality="xray", references_used=2)
+    out = finalize(_raw(is_medical_image=False), body_part="chest_adult", modality="xray", references_used=2)
+    assert out["overall_confidence"] is None and out["findings"] == [] and out["urgency"] == "routine"
+
+    out = finalize(_raw(urgency="emergency"), body_part="chest_adult", modality="xray", references_used=2)
+    assert out["referral"]["specialist"] == "Emergency department"
+
+    out = finalize(_raw(referral={"specialist": "Wizard"}), body_part="breast", modality="xray", references_used=2)
+    assert out["referral"]["specialist"] == "Breast surgeon"
+
+    out = finalize(_raw(detected_body_part="left knee"), body_part="chest_adult", modality="xray", references_used=2)
     assert out["overall_confidence"] == "moderate" and out["safety_notes"]
 
 
-def test_prompt_mentions_patient_image_last():
-    from app.references import ReferenceCase
-
+def test_prompt_lists_covered_conditions_and_patient_image_last():
     refs = [
-        ReferenceCase("a", "chest", "xray", "normal", "", "Clear lungs.", "lab", "", "", "x"),
-        ReferenceCase("b", "chest", "xray", "abnormal", "pneumonia", "Right lower lobe consolidation.", "lab", "", "", "y"),
+        ReferenceCase("a", "chest_adult", "xray", "normal", "", "Clear lungs.", "IU", "", "", "x"),
+        ReferenceCase("b", "chest_adult", "xray", "abnormal", "pneumonia", "Right lower lobe consolidation.", "IU", "", "", "y"),
     ]
-    text = build_user_prompt(body_part="chest", modality="xray", question="", references=refs, reference_images_attached=True)
+    text = build_user_prompt(body_part="chest_adult", modality="xray", question="", references=refs,
+                             reference_images_attached=True,
+                             covered_conditions=[("pneumonia", 40), ("normal (no abnormality)", 60)], sources=["IU"])
     assert "Image 3 (the last one) is the PATIENT'S image" in text
-    assert "pneumonia" in text and "Clear lungs." in text
+    assert "pneumonia (40)" in text and "Clear lungs." in text
 
 
 def test_dicom_upload_is_converted():
-    pydicom = pytest.importorskip("pydicom")
+    pytest.importorskip("pydicom")
     from pydicom.dataset import FileDataset, FileMetaDataset
     from pydicom.uid import ExplicitVRLittleEndian, generate_uid
 
@@ -153,6 +182,15 @@ def test_dicom_upload_is_converted():
     prepared = prepare_image(buf.getvalue(), "scan.dcm")
     assert prepared.source_format == "DICOM"
     assert b"Should Not Leak" not in prepared.png_bytes
+
+
+def test_16_bit_png_is_not_washed_out():
+    arr = (np.indices((128, 128)).sum(axis=0) * 100).astype("uint16")  # values up to ~25,000
+    buf = io.BytesIO()
+    Image.fromarray(arr).save(buf, format="PNG")
+    out = Image.open(io.BytesIO(prepare_image(buf.getvalue(), "w.png").png_bytes))
+    pixels = np.asarray(out)
+    assert pixels.min() < 20 and pixels.max() > 235 and 60 < pixels.mean() < 200
 
 
 def test_tiny_or_empty_images_rejected():

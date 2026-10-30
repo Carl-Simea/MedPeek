@@ -12,8 +12,16 @@ Confidence = Literal["high", "moderate", "low"]
 class Finding(BaseModel):
     finding: str
     location: str = ""
-    confidence: Confidence
     explanation: str = ""
+    supported_by_reference_data: bool
+    confidence: Optional[Confidence] = None  # null when the verified data doesn't cover it
+
+
+class Referral(BaseModel):
+    specialist: str
+    reason: str
+    timeframe: str
+    required: bool
 
 
 class ReferenceUsed(BaseModel):
@@ -37,16 +45,20 @@ class AnalysisResult(BaseModel):
     is_medical_image: bool
     detected_body_part: str = ""
     image_quality: Literal["good", "limited", "unreadable"]
+    primary_condition: str = ""
+    condition_in_reference_data: bool
     summary: str
     findings: list[Finding]
-    overall_confidence: Confidence
+    overall_confidence: Optional[Confidence] = None  # null = not given (not covered by verified data)
     confidence_reason: str = ""
     urgency: Literal["routine", "soon", "urgent", "emergency"]
     urgency_notice: Optional[str] = None
+    referral: Referral
     reference_comparison: str = ""
     next_steps: list[str]
     questions_for_doctor: list[str]
     references_used: list[ReferenceUsed]
+    reference_library_size: int = 0
     safety_notes: list[str]
     disclaimer: str
     model: str

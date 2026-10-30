@@ -131,6 +131,7 @@ def main() -> int:
                 source=row.get("source") or "",
                 verified_by=row.get("verified_by") or "",
                 max_side=settings.max_image_side,
+                reload=False,
             )
         except (ImageError, OSError) as exc:
             print(f"skip {image}: {exc}")
@@ -139,6 +140,7 @@ def main() -> int:
         added += 1
         print(f"added {case.case_id}  [{bp}/{mod}/{case.label}]")
 
+    lib.reload()
     print(f"\nDone: {added} added, {skipped} skipped. Library now has {len(lib.cases)} cases.")
     print("If the API is running, reload it: curl -X POST -H \"X-Admin-Token: $ADMIN_TOKEN\" localhost:8000/api/references/reload")
     return 0 if added or not rows else 1

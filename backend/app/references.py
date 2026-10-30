@@ -1,28 +1,34 @@
-"""Reference library: verified cases (image + report) that Gemma 4 compares against.
+"""Reference library: verified cases (image + report or expert label) that Gemma 4 compares against.
 
 This is how the project "trains" Gemma without GPUs: before answering, the backend
-pulls verified cases for the same body part and imaging type and puts them in
-the prompt as examples (retrieval-augmented generation).
+finds the verified cases that look most like the patient's image (same body part and
+imaging type) and puts them in the prompt as examples, together with a summary of
+which conditions the verified data covers (retrieval-augmented generation).
 
 On disk (kept out of git, see .gitignore):
 
     data/reference/<body_part>/<modality>/<case_id>/
         image.png     normalized image (metadata stripped)
+        vec.npy       small picture fingerprint for similarity search
         case.json     {"case_id", "body_part", "modality", "label", "diagnosis",
                        "report", "source", "verified_by", "added_at"}
 """
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 import threading
 import uuid
-from dataclasses import asdict, dataclass
+from collections import Counter
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .imaging import prepare_image
+import numpy as np
+
+from .imaging import prepare_image, thumbnail_vector
 
 LABELS = {"normal", "abnormal", "unknown"}
 
@@ -39,12 +45,19 @@ class ReferenceCase:
     verified_by: str
     added_at: str
     image_path: str
+    vector: np.ndarray | None = field(default=None, repr=False, compare=False)
 
     def public(self) -> dict:
         d = asdict(self)
-        d.pop("image_path")
-        d.pop("report")
+        for private in ("image_path", "report", "vector"):
+            d.pop(private, None)
         return d
+
+
+def condition_name(case: ReferenceCase) -> str:
+    if case.label == "normal":
+        return "normal (no abnormality)"
+    return (case.diagnosis or case.label or "unknown").strip().lower()
 
 
 class ReferenceLibrary:
@@ -64,6 +77,8 @@ class ReferenceLibrary:
                     image = meta_file.parent / "image.png"
                     if not image.exists():
                         continue
+                    vec_file = meta_file.parent / "vec.npy"
+                    vector = np.load(vec_file) if vec_file.exists() else None
                     cases.append(
                         ReferenceCase(
                             case_id=meta.get("case_id", meta_file.parent.name),
@@ -76,9 +91,10 @@ class ReferenceLibrary:
                             verified_by=meta.get("verified_by", ""),
                             added_at=meta.get("added_at", ""),
                             image_path=str(image),
+                            vector=vector,
                         )
                     )
-                except (KeyError, ValueError):
+                except (KeyError, ValueError, OSError):
                     continue
         with self._lock:
             self._cases = cases
@@ -100,25 +116,40 @@ class ReferenceLibrary:
     def count(self, body_part: str, modality: str | None = None) -> int:
         return sum(1 for c in self.cases if c.body_part == body_part and (modality is None or c.modality == modality))
 
-    # ---------- retrieval ----------
-    def retrieve(self, body_part: str, modality: str, k: int) -> list[ReferenceCase]:
-        """Pick up to k cases for the same body part and imaging type.
+    def conditions(self, body_part: str, modality: str) -> list[tuple[str, int]]:
+        """Which conditions the verified data covers for this body part, most common first."""
+        counts = Counter(condition_name(c) for c in self.cases if c.body_part == body_part and c.modality == modality)
+        return counts.most_common()
 
-        When both normal and abnormal examples exist, include one of each first so
-        Gemma sees the contrast, then fill the rest by most recently added.
+    def sources(self, body_part: str, modality: str) -> list[str]:
+        return sorted({c.source for c in self.cases if c.body_part == body_part and c.modality == modality and c.source})
+
+    # ---------- retrieval ----------
+    def retrieve(self, body_part: str, modality: str, k: int, query_vector: np.ndarray | None = None) -> list[ReferenceCase]:
+        """Pick up to k verified cases for the same body part and imaging type.
+
+        With a picture fingerprint, the most similar abnormal case and the most similar
+        normal case come first (so Gemma sees the contrast), then the next most similar.
+        Without one, fall back to one abnormal + one normal, most recently added.
         """
         if k <= 0:
             return []
         pool = [c for c in self.cases if c.body_part == body_part and c.modality == modality]
         if not pool:
             return []
-        pool.sort(key=lambda c: c.added_at, reverse=True)
+
+        if query_vector is not None and all(c.vector is not None and c.vector.shape == query_vector.shape for c in pool):
+            sims = np.stack([c.vector for c in pool]) @ query_vector
+            ranked = [pool[i] for i in np.argsort(-sims)]
+        else:
+            ranked = sorted(pool, key=lambda c: c.added_at, reverse=True)
+
         picked: list[ReferenceCase] = []
         for label in ("abnormal", "normal"):
-            match = next((c for c in pool if c.label == label and c not in picked), None)
+            match = next((c for c in ranked if c.label == label and c not in picked), None)
             if match and len(picked) < k:
                 picked.append(match)
-        for c in pool:
+        for c in ranked:
             if len(picked) >= k:
                 break
             if c not in picked:
@@ -126,8 +157,6 @@ class ReferenceLibrary:
         return picked
 
     def image_b64(self, case: ReferenceCase) -> str:
-        import base64
-
         return base64.b64encode(Path(case.image_path).read_bytes()).decode("ascii")
 
     # ---------- adding ----------
@@ -144,6 +173,7 @@ class ReferenceLibrary:
         source: str = "",
         verified_by: str = "",
         max_side: int = 1024,
+        reload: bool = True,
     ) -> ReferenceCase:
         label = (label or "unknown").strip().lower()
         if label not in LABELS:
@@ -154,6 +184,7 @@ class ReferenceLibrary:
         folder = self.root / body_part / modality / case_id
         folder.mkdir(parents=True, exist_ok=True)
         (folder / "image.png").write_bytes(prepared.png_bytes)
+        np.save(folder / "vec.npy", thumbnail_vector(prepared.png_bytes))
         meta = {
             "case_id": case_id,
             "body_part": body_part,
@@ -166,5 +197,7 @@ class ReferenceLibrary:
             "added_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         }
         (folder / "case.json").write_text(json.dumps(meta, indent=2))
-        self.reload()
-        return next(c for c in self.cases if c.case_id == case_id)
+        case = ReferenceCase(**meta, image_path=str(folder / "image.png"), vector=np.load(folder / "vec.npy"))
+        if reload:
+            self.reload()
+        return case
