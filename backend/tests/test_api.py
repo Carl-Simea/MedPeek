@@ -316,3 +316,27 @@ def test_emergency_referral_is_not_repeated():
     out = finalize(_raw(urgency="emergency", next_steps=["Go to the nearest emergency room immediately."]),
                    body_part="wrist_hand", modality="xray", references_used=2)
     assert sum("emergency" in step.lower() for step in out["next_steps"]) == 1
+
+
+def test_pdf_report_feedback_and_privacy(tmp_path, monkeypatch):
+    res = client.post(
+        "/api/analyze?wait=true",
+        files={"image": ("w.png", png_bytes(), "image/png")},
+        data={"body_part": "wrist", "question": "Is it broken? It hurts — a lot ≥ 7/10"},
+    ).json()
+    assert res["privacy_note"].startswith("Privacy:") and res["image_info"]["width"] == 256
+    pdf = client.post("/api/report/pdf", json=res)
+    assert pdf.status_code == 200 and pdf.content[:4] == b"%PDF" and pdf.headers["x-verification-code"].startswith("MP-")
+    assert client.post("/api/report/pdf", json={"nope": 1}).status_code == 422
+
+    from app import main as main_module
+
+    monkeypatch.setattr(main_module, "FEEDBACK_FILE", tmp_path / "feedback.jsonl")
+    ok = client.post("/api/feedback", json={"kind": "mistake", "message": "The wrist looks fine to me", "report_id": res["id"]})
+    assert ok.status_code == 201 and ok.json()["ticket"].startswith("FB-")
+    assert client.post("/api/feedback", json={"kind": "bug", "message": ""}).status_code == 422
+    assert client.get("/api/feedback").status_code == 401
+    items = client.get("/api/feedback", headers=ADMIN).json()["items"]
+    assert items[0]["report_id"] == res["id"] and items[0]["kind"] == "mistake"
+    assert client.get("/api/privacy").json()["privacy_note"]
+    assert client.get("/api/options").json()["privacy_note"]

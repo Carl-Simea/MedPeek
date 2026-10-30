@@ -60,6 +60,15 @@ def status() -> dict:
     return {"engine": "ollama", "model": settings.gemma_model, "model_ready": local["local_model_ready"], **local}
 
 
+def privacy_note() -> str:
+    """One plain sentence about where the patient's image goes, matching the engine in use."""
+    if engine() == "google":
+        return ("Privacy: MedPeek doesn't save your images. For fast answers, your image is sent to Google's Gemma 4 "
+                "service, which has its own privacy terms. Please don't upload images that show your name or ID.")
+    return ("Privacy: MedPeek doesn't save your images. Your image is read by Gemma 4 on MedPeek's own server and "
+            "isn't shared with anyone.")
+
+
 def analyze(user_prompt: str, images_b64: list[str]) -> tuple[dict, dict]:
     """Send the prompt + images to Gemma 4. Returns (parsed_json, info about the run)."""
     if engine() == "google":

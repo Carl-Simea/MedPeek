@@ -57,6 +57,8 @@ class AnalysisResult(BaseModel):
     safety_notes: list[str]
     disclaimer: str
     ai_notice: str  # always "MedPeek is AI and can make mistakes." -- show it highlighted at the bottom of the report
+    privacy_note: str = ""  # where the image goes (show it near the upload button and on reports)
+    image_info: dict = {}  # format, width, height of the uploaded image (for the PDF report)
     body_part_detected_by: str = "user"  # "user", "question" or "image" (when body_part was "auto")
     engine: str = ""  # "google" (hosted Gemma 4), "ollama" (local Gemma 4) or "mock"
     model: str
@@ -88,3 +90,4 @@ class Modality(BaseModel):
 class Options(BaseModel):
     body_parts: list[BodyPart]
     modalities: list[Modality]
+    privacy_note: str = ""
