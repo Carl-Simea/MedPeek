@@ -310,3 +310,9 @@ def test_google_engine_and_fallback(monkeypatch):
     monkeypatch.setattr(gemma.httpx, "post", failing_google)
     parsed, info = gemma.analyze("prompt", ["aGVsbG8="])
     assert info["engine"] == "ollama" and parsed["summary"]
+
+
+def test_emergency_referral_is_not_repeated():
+    out = finalize(_raw(urgency="emergency", next_steps=["Go to the nearest emergency room immediately."]),
+                   body_part="wrist_hand", modality="xray", references_used=2)
+    assert sum("emergency" in step.lower() for step in out["next_steps"]) == 1

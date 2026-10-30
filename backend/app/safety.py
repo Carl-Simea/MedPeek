@@ -220,7 +220,9 @@ def finalize(
 
     next_steps = _str_list(raw.get("next_steps"), 4)
     see = f"{_upper_first(_see(referral['specialist']))} ({referral['timeframe'].lower()})."
-    if referral["required"] and not any(referral["specialist"].split(" (")[0].lower() in s.lower() for s in next_steps):
+    # Don't repeat the referral if Gemma's own steps already say it ("go to the ER" counts for the emergency department).
+    keys = ["emergency", " er "] if referral["specialist"] == "Emergency department" else [referral["specialist"].split(" (")[0].lower()]
+    if referral["required"] and not any(k in f" {s.lower()} " for k in keys for s in next_steps):
         next_steps.insert(0, see)
     if not any("radiolog" in s.lower() or "report" in s.lower() for s in next_steps):
         next_steps.append("Ask for the radiologist's official report on this image.")
