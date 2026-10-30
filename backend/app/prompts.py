@@ -129,8 +129,9 @@ def build_user_prompt(
         n = len(references)
         if reference_images_attached:
             lines.append(
-                f"You are given {n + 1} images. Images 1 to {n} are VERIFIED REFERENCE CASES that look most similar to "
-                f"the patient's image, for comparison only. Image {n + 1} (the last one) is the PATIENT'S image."
+                f"You are given {n + 1} images. Images 1 to {n} are VERIFIED REFERENCE CASES from other people that look "
+                f"most similar to the patient's image, for comparison only. Image {n + 1} (the last one) is the PATIENT'S "
+                "image. Talk to the patient only about their own image; never describe a reference image as theirs."
             )
         else:
             lines.append("You are given 1 image: the PATIENT'S image. Most similar verified reference cases:")
@@ -148,8 +149,8 @@ def build_user_prompt(
     lines += [
         "",
         "Examine the PATIENT'S image and answer the patient's question. Return JSON that follows the schema: "
-        "a strong 3-5 sentence summary written for the patient, up to 5 findings, urgency, a referral to the right "
-        "specialist with the reason and timeframe, up to 4 next steps and up to 4 questions for their doctor. "
+        "a strong 3-5 sentence summary written for the patient, up to 3 findings, urgency, a referral to the right "
+        "specialist with the reason and timeframe, up to 3 next steps and up to 3 questions for their doctor. "
         "In reference_comparison, say in one or two sentences how the patient's image compares with the reference cases.",
     ]
     return "\n".join(lines)

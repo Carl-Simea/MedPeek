@@ -46,6 +46,7 @@ class Settings:
     think: bool = field(default_factory=lambda: _bool("GEMMA_THINK", False))
     ollama_timeout: float = field(default_factory=lambda: float(os.environ.get("OLLAMA_TIMEOUT", "600")))
     num_ctx: int = field(default_factory=lambda: int(os.environ.get("GEMMA_NUM_CTX", "8192")))
+    num_thread: int = field(default_factory=lambda: int(os.environ.get("GEMMA_NUM_THREAD", "0")))  # 0 = Ollama decides
     reference_dir: Path = field(default_factory=lambda: _path("REFERENCE_DIR", BACKEND_DIR / "data" / "reference"))
     max_reference_cases: int = field(default_factory=lambda: int(os.environ.get("MAX_REFERENCE_CASES", "2")))
     send_reference_images: bool = field(default_factory=lambda: _bool("SEND_REFERENCE_IMAGES", True))

@@ -10,7 +10,7 @@ from app.imaging import ImageError, prepare_image, thumbnail_vector
 from app.main import app
 from app.prompts import build_user_prompt
 from app.references import ReferenceCase, ReferenceLibrary
-from app.safety import finalize
+from app.safety import condition_is_covered, finalize
 
 client = TestClient(app)
 ADMIN = {"X-Admin-Token": "test-token"}
@@ -198,3 +198,21 @@ def test_tiny_or_empty_images_rejected():
         prepare_image(b"", "x.png")
     with pytest.raises(ImageError):
         prepare_image(png_bytes(size=(20, 20)), "x.png")
+
+
+def test_server_double_checks_coverage():
+    covered = [("pneumonia / consolidation", 50), ("cardiomegaly (enlarged heart)", 50), ("normal (no abnormality)", 53)]
+    out = finalize(_raw(primary_condition="Lung cancer"), body_part="chest_adult", modality="xray", references_used=2,
+                   covered_conditions=covered)
+    assert out["overall_confidence"] is None and out["referral"]["required"]
+    assert out["findings"][0]["confidence"] is None
+    out = finalize(_raw(primary_condition="Right lower lobe pneumonia",
+                        findings=[{"finding": "Patchy opacity consistent with pneumonia", "supported_by_reference_data": True,
+                                   "confidence": "high"}]),
+                   body_part="chest_adult", modality="xray", references_used=2, covered_conditions=covered)
+    assert out["overall_confidence"] == "high" and out["findings"][0]["confidence"] == "high"
+    assert condition_is_covered("Possible break of the distal radius", ["fracture", "normal (no abnormality)"])
+    assert condition_is_covered("Enlarged heart", ["cardiomegaly (enlarged heart)"])
+    assert not condition_is_covered("Soft-tissue swelling", ["fracture"])
+    assert condition_is_covered("No acute abnormality", ["normal (no abnormality)", "fracture"])
+    assert not condition_is_covered("No acute abnormality", ["fracture"])

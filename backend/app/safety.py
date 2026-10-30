@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+import re
+
 from .body_parts import BODY_PARTS, SPECIALISTS, body_part_label, default_specialist
 
 LEVELS = ["low", "moderate", "high"]
@@ -63,8 +65,62 @@ def _is_normal(condition: str) -> bool:
     return not c or any(w in c for w in ("normal", "no abnormal", "no acute", "no fracture", "unremarkable", "none"))
 
 
-def finalize(raw: dict, *, body_part: str, modality: str, references_used: int) -> dict:
-    """Clean up Gemma's JSON and apply the confidence, referral and urgency rules."""
+# Words too general to prove a condition is in our data ("bone", "lung", "possible" ...).
+_GENERIC = {
+    "with", "without", "from", "that", "this", "after", "before", "near", "into", "there", "seen", "shows", "showing",
+    "possible", "possibly", "probable", "likely", "suspected", "suspicious", "mild", "moderate", "severe", "small", "large",
+    "left", "right", "upper", "lower", "distal", "proximal", "bone", "bones", "joint", "joints", "lung", "lungs", "chest",
+    "spine", "body", "tooth", "teeth", "kidney", "abdomen", "area", "region", "side", "disease", "changes", "change",
+    "condition", "finding", "findings", "signs", "sign", "acute", "chronic", "other", "benign", "malignant", "locally",
+    "aggressive", "proven", "biopsy", "needs", "more", "imaging", "unclear", "line", "healed", "fluid", "spread",
+    "partly", "free", "wear", "curved", "slipped", "abnormality", "normal", "soft", "tissue", "swelling",
+}
+_SYNONYMS = [
+    (r"\bbroken\b|\bbreaks?\b|\bcrack", "fracture"),
+    (r"enlarged heart", "cardiomegaly"),
+    (r"collapsed lung", "pneumothorax"),
+    (r"fluid (around|in) the lung", "pleural effusion"),
+    (r"tooth decay|\bcavit", "decay caries"),
+    (r"kidney stone|renal stone|gallstone", "stone"),
+    (r"\bcancer\b|carcinoma", "cancer"),
+]
+
+
+def _key_words(text: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z]+", text.lower()) if len(w) >= 4 and w not in _GENERIC}
+
+
+def condition_is_covered(condition: str, covered: list[str]) -> bool:
+    """Server-side check that a condition really is one our verified data contains for this body part."""
+    if _is_normal(condition):
+        return any(name.startswith("normal") for name in covered)
+    text = condition.lower()
+    for pattern, word in _SYNONYMS:
+        if re.search(pattern, text):
+            text += f" {word}"
+    words = _key_words(text)
+    for name in covered:
+        if name.startswith("normal"):
+            continue
+        if any(k in text for k in _key_words(name)) or any(w in name for w in words):
+            return True
+    return False
+
+
+def finalize(
+    raw: dict,
+    *,
+    body_part: str,
+    modality: str,
+    references_used: int,
+    covered_conditions: list[tuple[str, int]] | None = None,
+) -> dict:
+    """Clean up Gemma's JSON and apply the confidence, referral and urgency rules.
+
+    covered_conditions: the conditions our verified data has for this body part. When given, Gemma's
+    claim that a condition is covered is double-checked against this list.
+    """
+    covered = [name for name, _ in covered_conditions] if covered_conditions is not None else None
     notes: list[str] = []
     cap = "high"
 
@@ -91,6 +147,7 @@ def finalize(raw: dict, *, body_part: str, modality: str, references_used: int) 
         and quality != "unreadable"
         and references_used > 0
         and bool(raw.get("condition_in_reference_data", False))
+        and (covered is None or condition_is_covered(condition, covered))
     )
     if not supported and is_medical:
         if references_used == 0:
@@ -102,7 +159,11 @@ def finalize(raw: dict, *, body_part: str, modality: str, references_used: int) 
         for f in (raw.get("findings") or [])[:5]:
             if not isinstance(f, dict) or not _str(f.get("finding")):
                 continue
-            backed = supported and bool(f.get("supported_by_reference_data", False))
+            backed = (
+                supported
+                and bool(f.get("supported_by_reference_data", False))
+                and (covered is None or condition_is_covered(_str(f.get("finding")), covered))
+            )
             findings.append(
                 {
                     "finding": _str(f.get("finding"), 160),

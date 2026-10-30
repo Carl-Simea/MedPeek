@@ -40,7 +40,11 @@ def analyze(user_prompt: str, images_b64: list[str]) -> tuple[dict, dict]:
         "think": settings.think,
         "format": OUTPUT_SCHEMA,
         "keep_alive": -1,
-        "options": {"temperature": 0.2, "num_ctx": settings.num_ctx},
+        "options": {
+            "temperature": 0.2,
+            "num_ctx": settings.num_ctx,
+            **({"num_thread": settings.num_thread} if settings.num_thread > 0 else {}),
+        },
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt, "images": images_b64},

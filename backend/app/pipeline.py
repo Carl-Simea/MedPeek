@@ -44,7 +44,7 @@ def run_analysis(
         )
         raw, _timing = gemma.analyze(prompt, images)
 
-    final = finalize(raw, body_part=body_part, modality=modality, references_used=len(refs))
+    final = finalize(raw, body_part=body_part, modality=modality, references_used=len(refs), covered_conditions=covered)
     return {
         "id": uuid.uuid4().hex[:12],
         "body_part": body_part,
