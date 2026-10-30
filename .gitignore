@@ -19,3 +19,6 @@ __pycache__/
 node_modules/
 dist/
 .DS_Store
+
+# Local accounts, password hashes and session signing key
+X_ray_Examiner/instance/
