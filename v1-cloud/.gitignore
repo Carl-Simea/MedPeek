@@ -1,0 +1,32 @@
+# Patient data never goes to GitHub (this repo is public)
+v1-cloud/backend/data/
+data/
+datasets/
+*.dcm
+*.dicom
+
+# Secrets and local settings
+.env
+.secret_key
+
+# Local databases (accounts, password hashes, chats, uploads)
+*.db
+*.sqlite3
+v1-cloud/frontend/instance/
+
+# v2-local downloads and test images
+FracAtlas.zip
+FracAtlas.part
+hands/
+test_xrays/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Node / OS
+node_modules/
+dist/
+.DS_Store
