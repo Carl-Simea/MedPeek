@@ -1,24 +1,29 @@
-# Patient data never goes to GitHub (this repo is public)
-backend/data/
+# MedPeek: files that must never go to GitHub (this repo is public)
+
+# Patient data and medical datasets
 data/
 datasets/
 *.dcm
 *.dicom
 
-# Secrets and local settings
+# Secrets and keys
 .env
-backend/.env
+.secret_key
+*.key
+
+# Local databases (accounts, password hashes, chats, uploads)
+*.db
+*.sqlite3
 
 # Python
 __pycache__/
 *.pyc
 .venv/
+venv/
 .pytest_cache/
 
-# Node (frontend)
-node_modules/
-dist/
+# Editors and OS
+.vscode/
+.idea/
 .DS_Store
-
-# Local accounts, password hashes and session signing key
-X_ray_Examiner/instance/
+Thumbs.db
