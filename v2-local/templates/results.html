@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}{{ chat.title }} · MedPeek{% endblock %}
+{% block body_class %}page-chat{% endblock %}
+
+{% block content %}
+<div class="app-shell">
+    <aside id="sidebar" class="sidebar glass">
+        <div class="sidebar-top">
+            <a href="{{ url_for('results') }}" class="brand brand-small">
+                <span class="brand-mark">
+                    <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3c-5 0-9 4-9 9 0 7 9 17 9 17s9-10 9-17c0-5-4-9-9-9Z" fill="none" stroke="currentColor" stroke-width="2.6"/><circle cx="16" cy="12" r="3.6" fill="currentColor"/></svg>
+                </span>
+                MedPeek
+            </a>
+            <button type="button" class="icon-btn sidebar-close" data-sidebar-toggle aria-label="Close chat history">
+                <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
+            </button>
+        </div>
+
+        <form action="{{ url_for('create_chat') }}" method="POST">
+            <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+            <button type="submit" class="btn-ocean w-100 new-chat">
+                <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+                New chat
+            </button>
+        </form>
+
+        <label class="chat-search">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg>
+            <input type="search" id="chat-search" placeholder="Search chats" aria-label="Search chats">
+        </label>
+
+        <div class="history-label">Chat history</div>
+        <nav class="chat-list" id="chat-list">
+            {% for c in chats %}
+            <a href="{{ url_for('chat', chat_id=c.id) }}" class="chat-item {% if c.id == chat.id %}active{% endif %}"
+               data-title="{{ c.title|lower }}" {% if c.id == chat.id %}id="current-chat-item"{% endif %}>
+                <svg viewBox="0 0 24 24"><path d="M5 5h14v10H9l-4 4V5Z"/></svg>
+                <span class="chat-item-text">
+                    <span class="chat-item-title">{{ c.title }}</span>
+                    <span class="chat-item-meta" data-utc="{{ c.updated_at }}">{{ c.xrays }} X-ray{{ '' if c.xrays == 1 else 's' }}</span>
+                </span>
+            </a>
+            {% endfor %}
+            <p class="no-results" hidden>No chats match.</p>
+        </nav>
+
+        <div class="sidebar-bottom">
+            <span class="user-initial">{{ user.first_name[0] }}</span>
+            <span class="user-name">{{ user.first_name }}<small>@{{ user.username }}</small></span>
+            <form action="{{ url_for('logout') }}" method="POST">
+                <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+                <button type="submit" class="icon-btn" title="Log out" aria-label="Log out">
+                    <svg viewBox="0 0 24 24"><path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10"/></svg>
+                </button>
+            </form>
+        </div>
+    </aside>
+    <div class="sidebar-backdrop" data-sidebar-toggle></div>
+
+    <div class="chat-column">
+        <header class="topbar glass">
+            <button type="button" class="icon-btn menu-btn" data-sidebar-toggle aria-label="Open chat history">
+                <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+            </button>
+            <h1 class="chat-title" id="chat-title">{{ chat.title }}</h1>
+
+            <button type="button" id="model-status" class="status-pill status-starting" title="Gemma status (click to retry if it failed)">
+                <span class="dot"></span><span class="status-text">Starting Gemma...</span>
+            </button>
+
+            <div class="topbar-right">
+                <div class="counter" title="Uploads used in this chat">
+                    <span class="counter-bar"><span id="counter-fill" data-percent="{{ (image_count / max_images * 100)|round|int }}"></span></span>
+                    <span id="counter-text">{{ image_count }}/{{ max_images }}</span>
+                </div>
+                <button id="theme-toggle" class="icon-btn" type="button" title="Light / dark mode" aria-label="Switch light or dark mode">
+                    <span class="theme-icon"></span>
+                </button>
+                <form action="{{ url_for('delete_chat', chat_id=chat.id) }}" method="POST" data-confirm="Delete this chat and its X-rays?">
+                    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+                    <button class="icon-btn" type="submit" title="Delete this chat" aria-label="Delete this chat">
+                        <svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>
+                    </button>
+                </form>
+            </div>
+        </header>
+
+        <main id="chat-window" class="chat-window">
+            <div id="messages" class="messages">
+                {% include "_messages.html" %}
+            </div>
+        </main>
+
+        <section class="composer-wrap">
+            <div class="composer-inner">
+                <div class="suggestions" id="suggestions">
+                    <button type="button" class="suggestion" data-text="I fell on my outstretched hand.">Fell on my hand</button>
+                    <button type="button" class="suggestion" data-text="I punched a wall and my knuckle hurts.">Punched a wall</button>
+                    <button type="button" class="suggestion" data-text="What is the difference between a displaced and a non-displaced fracture?">Displaced vs not?</button>
+                    <button type="button" class="suggestion" data-text="What are growth plates?">What are growth plates?</button>
+                </div>
+
+                <div id="previews" class="previews"></div>
+
+                <form id="composer" class="composer glass" autocomplete="off" data-chat-id="{{ chat.id }}"
+                      data-max-images="{{ max_images }}" data-max-per-send="{{ max_per_send }}" data-image-count="{{ image_count }}">
+                    <input type="file" id="xray-input" accept="image/png,image/jpeg" multiple hidden>
+                    <button type="button" id="attach-btn" class="icon-btn attach" title="Attach X-rays (PNG or JPEG)" aria-label="Attach X-rays">
+                        <svg viewBox="0 0 24 24"><path d="M21 11.5 12.5 20a5.5 5.5 0 0 1-7.8-7.8L13.4 3.5a3.7 3.7 0 0 1 5.2 5.2L9.9 17.4a1.8 1.8 0 0 1-2.6-2.6l8-8"/></svg>
+                    </button>
+                    <textarea id="message-input" rows="1" placeholder="Message MedPeek or drop an X-ray here..." maxlength="2000"></textarea>
+                    <button type="submit" id="send-btn" class="send-btn" title="Send (Enter)" aria-label="Send">
+                        <svg viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+                    </button>
+                </form>
+                <div class="composer-hint">Enter to send · Shift+Enter for a new line · up to {{ max_per_send }} X-rays at a time</div>
+            </div>
+        </section>
+    </div>
+</div>
+
+<div id="drop-overlay" class="drop-overlay" aria-hidden="true">
+    <div class="drop-box">
+        <svg viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
+        Drop your X-rays to attach them
+    </div>
+</div>
+{% endblock %}

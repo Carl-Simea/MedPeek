@@ -1,0 +1,6 @@
+__pycache__/
+images.db
+.secret_key
+FracAtlas.zip
+FracAtlas.part
+hands/

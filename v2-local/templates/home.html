@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}MedPeek · Sign in{% endblock %}
+{% block body_class %}page-home{% endblock %}
+
+{% block content %}
+<button id="theme-toggle" class="icon-btn theme-corner" type="button" title="Light / dark mode" aria-label="Switch light or dark mode">
+    <span class="theme-icon"></span>
+</button>
+
+<main class="home-grid">
+    <section class="hero reveal">
+        <div class="brand">
+            <span class="brand-mark">
+                <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3c-5 0-9 4-9 9 0 7 9 17 9 17s9-10 9-17c0-5-4-9-9-9Z" fill="none" stroke="currentColor" stroke-width="2.4"/><circle cx="16" cy="12" r="3.6" fill="currentColor"/></svg>
+            </span>
+            MedPeek
+        </div>
+        <h1>Peek inside the break.</h1>
+        <p class="lead-text">Upload a hand X-ray. MedPeek's AI compares it with normal X-rays, finds the broken bone, names the type of break, and explains what usually causes it.</p>
+
+        <ul class="feature-list">
+            <li>
+                <span class="feature-icon">
+                    <svg viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="16" rx="2"/><rect x="13" y="4" width="8" height="16" rx="2"/></svg>
+                </span>
+                <div><strong>Side-by-side comparison</strong><span>Every upload is checked against a normal X-ray of the same body part.</span></div>
+            </li>
+            <li>
+                <span class="feature-icon">
+                    <svg viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7l8-4Z"/></svg>
+                </span>
+                <div><strong>Child-aware</strong><span>Recognizes growth plates in children's X-rays, so they aren't mistaken for breaks.</span></div>
+            </li>
+            <li>
+                <span class="feature-icon">
+                    <svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+                </span>
+                <div><strong>Private by design</strong><span>Your chats and uploads are tied to your account and run on a local AI model.</span></div>
+            </li>
+        </ul>
+    </section>
+
+    <section class="auth-card glass reveal" style="--delay: 120ms">
+        <div class="tabs" role="tablist">
+            <button type="button" class="tab {% if tab != 'register' %}active{% endif %}" data-tab="login" role="tab">Sign in</button>
+            <button type="button" class="tab {% if tab == 'register' %}active{% endif %}" data-tab="register" role="tab">Create account</button>
+            <span class="tab-indicator"></span>
+        </div>
+
+        <form class="auth-form {% if tab != 'register' %}active{% endif %}" id="form-login" action="{{ url_for('login') }}" method="POST" autocomplete="on">
+            <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+            <h2>Welcome back</h2>
+            <p class="muted">Sign in to continue your X-ray chat.</p>
+            {% for message in get_flashed_messages(category_filter=['login']) %}
+                <div class="form-alert">{{ message }}</div>
+            {% endfor %}
+            <label class="field">
+                <span>Username</span>
+                <input type="text" name="username" autocomplete="username" required>
+            </label>
+            <label class="field">
+                <span>Password</span>
+                <span class="password-wrap">
+                    <input type="password" name="password" autocomplete="current-password" required>
+                    <button type="button" class="show-password" aria-label="Show password">Show</button>
+                </span>
+            </label>
+            <button type="submit" class="btn-ocean w-100">Sign in</button>
+        </form>
+
+        <form class="auth-form {% if tab == 'register' %}active{% endif %}" id="form-register" action="{{ url_for('register') }}" method="POST" autocomplete="on">
+            <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+            <h2>Create your account</h2>
+            <p class="muted">MedPeek will greet you by your first name.</p>
+            {% for message in get_flashed_messages(category_filter=['register']) %}
+                <div class="form-alert">{{ message }}</div>
+            {% endfor %}
+            <label class="field">
+                <span>First name</span>
+                <input type="text" name="first_name" autocomplete="given-name" maxlength="30" required>
+            </label>
+            <label class="field">
+                <span>Username</span>
+                <input type="text" name="username" autocomplete="username" minlength="3" maxlength="30" pattern="[A-Za-z0-9_.\-]{3,30}" title="3 to 30 letters, numbers, dots, dashes or underscores" required>
+            </label>
+            <label class="field">
+                <span>Password <small class="muted">(8+ characters)</small></span>
+                <span class="password-wrap">
+                    <input type="password" name="password" autocomplete="new-password" minlength="8" required>
+                    <button type="button" class="show-password" aria-label="Show password">Show</button>
+                </span>
+                <span class="strength"><span class="strength-bar"></span></span>
+            </label>
+            <label class="field">
+                <span>Confirm password</span>
+                <input type="password" name="confirm" autocomplete="new-password" minlength="8" required>
+            </label>
+            <button type="submit" class="btn-ocean w-100">Create account</button>
+        </form>
+    </section>
+</main>
+
+<footer class="site-footer">
+    Hacktober Fest 2026 · &copy; MedPeek · Educational tool, not a medical diagnosis.
+</footer>
+{% endblock %}

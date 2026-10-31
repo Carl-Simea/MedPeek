@@ -1,0 +1,93 @@
+{# One chat message per item. Used by results.html and by /api/message for new messages. #}
+{% for m in messages %}
+{% if m.sender == 'user' %}
+<div class="msg msg-user" data-id="{{ m.id }}">
+    <div class="msg-body">
+        {% if m.has_image %}
+        <a class="xray-thumb" href="{{ url_for('message_image', message_id=m.id) }}" target="_blank" rel="noopener" title="Open full size">
+            <img src="{{ url_for('message_image', message_id=m.id) }}" alt="Uploaded X-ray {{ m.filename }}" loading="lazy">
+            <span class="thumb-name">{{ m.filename }}</span>
+        </a>
+        {% endif %}
+        {% if m.text %}<div class="bubble bubble-user">{{ m.text }}</div>{% endif %}
+    </div>
+</div>
+{% elif m.kind == 'analysis' and m.data %}
+{% set d = m.data %}
+<div class="msg msg-bot" data-id="{{ m.id }}">
+    <div class="avatar" aria-hidden="true">
+        <svg viewBox="0 0 32 32"><path d="M16 3c-5 0-9 4-9 9 0 7 9 17 9 17s9-10 9-17c0-5-4-9-9-9Z" fill="none" stroke="currentColor" stroke-width="2.6"/><circle cx="16" cy="12" r="3.6" fill="currentColor"/></svg>
+    </div>
+    <article class="analysis glass">
+        <header class="analysis-head">
+            <div>
+                <div class="eyebrow">X-ray analysis</div>
+                <h3>{{ d.body_part|capitalize }} X-ray{% if d.view in ['frontal', 'lateral', 'oblique'] %} <span class="muted">· {{ d.view }} view</span>{% endif %}</h3>
+            </div>
+            <div class="head-badges">
+                <span class="pill pill-{{ d.age_group }}">{{ {'adult': 'Adult', 'child': 'Child', 'unsure': 'Age unsure'}[d.age_group] }}</span>
+                <span class="confidence conf-{{ d.confidence }}" title="How sure Gemma is">
+                    <span></span><span></span><span></span>
+                    <em>{{ d.confidence|capitalize }}</em>
+                </span>
+            </div>
+        </header>
+
+        <p class="greeting">{{ d.name }}, {% if d.breaks %}I found {{ d.breaks|length }} likely break{{ 's' if d.breaks|length > 1 }}.{% else %}I don't see a break in this X-ray.{% endif %}</p>
+
+        {% if d.child_path %}
+        <div class="notice notice-child">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
+            <div>
+                {% if d.growth_plates %}The thin dark lines near the ends of the bones are growth plates. They're normal in children, not breaks.{% elif d.age_group == 'unsure' %}I can't tell whether this is a child or an adult, so I'm treating it as a child's X-ray to be safe.{% else %}This looks like a child's X-ray.{% endif %}
+                I don't guess how a child got hurt. A doctor should check any injury in a child.
+            </div>
+        </div>
+        {% endif %}
+
+        {% if d.breaks %}
+        <div class="breaks">
+            {% for b in d.breaks %}
+            <div class="break-card">
+                <div class="break-num">{{ loop.index }}</div>
+                <div class="break-info">
+                    <div class="bone">{{ b.bone|capitalize }}</div>
+                    <div class="where">{{ b.location|capitalize }}</div>
+                    <div class="chips">
+                        <span class="chip chip-type">{{ b.type|capitalize }}</span>
+                        <span class="chip chip-{{ b.displaced }}">{{ {'yes': 'Displaced', 'no': 'Not displaced', 'unsure': 'Displacement unclear'}[b.displaced] }}</span>
+                    </div>
+                    {% if b.cause %}
+                    <div class="cause">
+                        <svg viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z"/></svg>
+                        <span>This kind of break usually comes from <strong>{{ b.cause }}</strong>.</span>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="all-clear">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>
+            No break found. If it still hurts, a doctor can take more views.
+        </div>
+        {% endif %}
+
+        {% if d.notes %}<p class="notes"><strong>Also:</strong> {{ d.notes }}.</p>{% endif %}
+
+        <footer class="analysis-foot">
+            {% if d.reference %}<span>Compared with <code>{{ d.reference }}</code></span>{% endif %}
+            <span>Educational tool, not a diagnosis.</span>
+        </footer>
+    </article>
+</div>
+{% else %}
+<div class="msg msg-bot" data-id="{{ m.id }}">
+    <div class="avatar" aria-hidden="true">
+        <svg viewBox="0 0 32 32"><path d="M16 3c-5 0-9 4-9 9 0 7 9 17 9 17s9-10 9-17c0-5-4-9-9-9Z" fill="none" stroke="currentColor" stroke-width="2.6"/><circle cx="16" cy="12" r="3.6" fill="currentColor"/></svg>
+    </div>
+    <div class="bubble bubble-bot glass">{{ m.text }}</div>
+</div>
+{% endif %}
+{% endfor %}
