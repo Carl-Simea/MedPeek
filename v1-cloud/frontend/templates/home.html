@@ -1,1 +1,71 @@
-<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MedPeek · A little clarity, a little care</title><link rel="icon" href="/static/logo.svg" type="image/svg+xml"><link rel="stylesheet" href="/static/style.css"></head><body><header><a class="brand" href="/"><img src="/static/logo.svg" alt="MedPeek logo"><span>MedPeek<small>A little clarity. A little care.</small></span></a><nav><button id="theme-toggle" aria-label="Switch color theme">◐</button><a class="button" href="/results">Open MedPeek ↗</a></nav></header><main class="landing"><div class="eyebrow">A CLEARER PICTURE OF YOUR HEALTH</div><div class="logo-halo"><img src="/static/logo.svg" alt=""></div><h1>Medical images.<br>A more human explanation.</h1><p>Your scans can raise a lot of questions.<br>Take a closer look with clear, thoughtful explanations.</p><a class="primary button" href="/results">Let’s take a peek <span>↗</span></a><div class="chips"><span>X-ray</span><span>MRI</span><span>CT scans</span></div><p class="disclaimer">For education and understanding. Always review findings with your healthcare professional.</p></main><script src="/static/script.js"></script></body></html>
+{% extends "base.html" %}
+{% block title %}MedPeek · Understand your scan, find the right care{% endblock %}
+{% block body_class %}landing{% endblock %}
+{% block content %}
+<main class="hero-wrap">
+  {% if not_found %}<div class="notice">That page doesn't exist. Here's the front door instead.</div>{% endif %}
+  <section class="hero">
+    <div class="hero-copy">
+      <span class="eyebrow">AI health companion · Gemma 4</span>
+      <h1>Understand your X&#8209;ray.<br>Know where to go next.</h1>
+      <p class="lede">Describe what's going on or attach your X-ray, MRI or CT scan. MedPeek explains it in plain words, compares it with thousands of verified cases, names the kind of doctor who treats it, and finds the closest emergency rooms, urgent care centers and specialists near your ZIP code.</p>
+      <div class="cta">
+        {% if g.user %}
+          <a class="btn primary big" href="/chat">Open your conversations</a>
+        {% else %}
+          <a class="btn primary big" href="/register">Start a conversation</a>
+          <a class="btn big" href="/login">Sign in</a>
+        {% endif %}
+      </div>
+      <p class="meta">Free · no scan needed to start · <span id="status-pill" class="pill {{ 'ok' if backend and backend.status == 'ok' else 'off' }}">{{ 'MedPeek is online' if backend and backend.status == 'ok' else 'MedPeek is starting up' }}</span></p>
+    </div>
+    <div class="hero-card" aria-hidden="true">
+      <div class="chat-demo">
+        <div class="msg user">I fell on my wrist yesterday and it's swollen. Is it broken?</div>
+        <div class="msg bot">A swollen wrist after a fall should be checked for a fracture. If you attach the X-ray I can look at it with you. Can you move your fingers and feel them normally?</div>
+        <div class="msg user">Here's the X-ray. I'm in 11218.</div>
+        <div class="msg bot report">
+          <strong>Possible break of the distal radius</strong>
+          <span>Who to see: Orthopedic surgeon · within 1–2 days</span>
+          <span class="demo-place">📍 Maimonides Medical Center ER · 1.2 mi · (718) 283-6000</span>
+          <span class="demo-place">📍 Dr. Jennifer Hashem, hand surgery · 1.0 mi</span>
+          <em>MedPeek is AI and can make mistakes.</em>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="how" class="steps">
+    <h2>How it works</h2>
+    <div class="grid3">
+      <article><span class="num">1</span><h3>Tell MedPeek what's going on</h3><p>Type like you'd talk to a nurse. No forms, no body-part menus. Attach a scan whenever you have one; MedPeek works out the body part itself.</p></article>
+      <article><span class="num">2</span><h3>Get a plain-language reading</h3><p>Gemma 4 compares your image with the most similar verified cases from published, expert-labeled datasets and explains what it sees, what it means and how urgent it is.</p></article>
+      <article><span class="num">3</span><h3>Know exactly where to go</h3><p>Every answer names the right kind of doctor. Add your ZIP code and MedPeek lists the three closest emergency rooms, urgent care centers and specialists, with directions and phone numbers.</p></article>
+    </div>
+  </section>
+
+  <section class="features">
+    <div class="grid4">
+      <article><h3>Chat first</h3><p>Ask about symptoms, a report you already have, or which doctor treats what.</p></article>
+      <article><h3>Every body part</h3><p>Skull to foot, X-ray, MRI and CT, grounded in a library of verified reference cases.</p></article>
+      <article><h3>Care near you</h3><p>Top 3 nearby places on a map, open-24/7 ERs flagged, one-tap directions.</p></article>
+      <article><h3>Take it to your doctor</h3><p>Download a PDF of any report with the date, scan details and a verification code.</p></article>
+    </div>
+  </section>
+
+  <section id="trust" class="trust">
+    <h2>Data &amp; privacy</h2>
+    <div class="grid2">
+      <article>
+        <h3>Where the knowledge comes from</h3>
+        <p>MedPeek doesn't guess from scratch. Before answering, it retrieves the most similar cases from a library built from open, expert-labeled datasets (FracAtlas, OrthoFrac-XR, BTXRD, BDCXR-3257, Indiana University chest X-rays, ROCOv2, Mammo-MX and more) and shows Gemma 4 those cases next to your image. Care-finder results come from US government data: the CMS hospital list, HIFLD hospital locations, the NPI Registry of licensed clinicians and GeoNames ZIP codes.</p>
+      </article>
+      <article>
+        <h3>What happens to your image</h3>
+        <p>MedPeek doesn't save your images. Names, IDs and other metadata are stripped before analysis. For fast answers, the image is sent to Google's Gemma 4 service, which has its own privacy terms; please don't upload images that show your name or ID. Your conversations are stored only in your MedPeek account.</p>
+        <p><strong>MedPeek is AI and can make mistakes.</strong> It is a learning project, not a medical device, and not a diagnosis.</p>
+      </article>
+    </div>
+  </section>
+</main>
+{% endblock %}

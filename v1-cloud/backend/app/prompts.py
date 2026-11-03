@@ -147,3 +147,67 @@ def build_user_prompt(
         "In reference_comparison, say in one or two sentences how the patient's image compares with the reference cases.",
     ]
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------- text chat (no image)
+CHAT_SYSTEM_PROMPT = """You are MedPeek, a calm, clear health assistant in a patient app. You run on Gemma 4.
+You talk with patients about symptoms, injuries, X-rays, MRIs and CT scans, what their report means, which kind of
+doctor treats what, and what to do next. You do not diagnose.
+
+How to answer:
+- Plain words, 8th-grade reading level, short paragraphs. Be warm and direct. Answer the question first.
+- If a scan would help (they describe an injury, a lump, a cough that won't go away, or ask what an image shows), say
+  so and set needs_image to true: they can attach the X-ray, MRI or CT in this chat and you will read it.
+- Set body_part to the body area the conversation is about, when clear.
+- Always set specialist to the kind of doctor who usually treats what they describe (a broken bone -> orthopedic
+  surgeon, a tooth -> dentist, chest infection -> pulmonologist, a child -> pediatrician, nothing specific -> primary
+  care doctor). Set urgency honestly: emergency only for signs that can't wait (chest pain, trouble breathing, a bone
+  out of place, heavy bleeding, weakness or numbness, a head injury with confusion); then tell them to call 911 or go
+  to the nearest emergency room, and set emergency to true.
+- Nearby care: if they ask where to go, for a hospital, urgent care, ER or a doctor near them, set wants_nearby_care to
+  true. If their message contains a US ZIP code, copy it into zip_code. NEVER invent clinic names, addresses or phone
+  numbers: the app looks up real places from government data and shows them under your reply. If they want nearby
+  care and you don't know their ZIP code, ask for it.
+- If a MedPeek report is provided in the conversation, use it to explain and answer follow-ups about that report.
+- Stay on health. For unrelated requests (code, homework, politics, jokes, other products), set topic_ok to false and
+  reply with one friendly sentence that you can only help with health questions and medical images.
+- Never claim certainty. Remind them, briefly, when something needs a doctor's eyes.
+- Reply with JSON only, following the schema exactly."""
+
+CHAT_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "reply": {"type": "string"},
+        "topic_ok": {"type": "boolean"},
+        "needs_image": {"type": "boolean"},
+        "body_part": {"type": "string"},
+        "specialist": {"type": "string", "enum": SPECIALISTS + [""]},
+        "urgency": {"type": "string", "enum": ["routine", "soon", "urgent", "emergency"]},
+        "emergency": {"type": "boolean"},
+        "wants_nearby_care": {"type": "boolean"},
+        "zip_code": {"type": "string"},
+    },
+    "required": ["reply", "topic_ok", "needs_image", "body_part", "specialist", "urgency", "emergency",
+                 "wants_nearby_care", "zip_code"],
+}
+
+
+def report_context(report: dict | None) -> str:
+    """A compact text version of a MedPeek report, so the chat can answer follow-up questions about it."""
+    if not isinstance(report, dict) or not report.get("summary"):
+        return ""
+    ref = report.get("referral") or {}
+    lines = [
+        "MedPeek report the patient is asking about:",
+        f"- Image: {report.get('modality_label', '')} of the {str(report.get('body_part_label', '')).lower()}",
+        f"- Main finding: {report.get('primary_condition') or 'none stated'}",
+        f"- Summary: {_clip(str(report.get('summary', '')), 700)}",
+    ]
+    findings = [f.get("finding", "") for f in (report.get("findings") or []) if isinstance(f, dict)]
+    if findings:
+        lines.append("- Findings: " + "; ".join(findings[:4]))
+    if ref.get("specialist"):
+        lines.append(f"- Referral: {ref['specialist']} ({ref.get('timeframe', '')}); urgency {report.get('urgency', '')}")
+    if report.get("coverage_note"):
+        lines.append(f"- Data note: {report['coverage_note']}")
+    return "\n".join(lines)

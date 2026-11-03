@@ -62,7 +62,7 @@ def init_auth(app):
                 g.user = conn.execute('SELECT users.id, users.username FROM sessions JOIN users ON users.id=sessions.user_id WHERE token_hash=? AND expires>?', (token_hash(token), time.time())).fetchone()
             if g.user is None:
                 session.clear()
-        public = {'home', 'login', 'register', 'static'}
+        public = {'home', 'login', 'register', 'static', 'results'}
         if request.endpoint not in public and not g.user:
             if request.path.startswith('/api/') or request.path == '/clear':
                 return jsonify(error='Please sign in to continue.'), 401
@@ -84,7 +84,7 @@ def init_auth(app):
 
     def account_page(registering=False):
         if g.user:
-            return redirect(url_for('results'))
+            return redirect(url_for('chat_page'))
         error = None
         if request.method == 'POST':
             username = request.form.get('username', '').strip().lower()
@@ -128,7 +128,7 @@ def init_auth(app):
                     conn.execute('INSERT INTO sessions VALUES (?,?,?)', (token_hash(token), user_id, now+43200))
                 session['auth_token'] = token
                 csrf()
-                return redirect(url_for('results'))
+                return redirect(url_for('chat_page'))
         return render_template('auth.html', registering=registering, error=error)
 
     @app.route('/login', methods=['GET', 'POST'])

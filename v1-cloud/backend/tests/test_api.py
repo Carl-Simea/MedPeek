@@ -340,3 +340,44 @@ def test_pdf_report_feedback_and_privacy(tmp_path, monkeypatch):
     assert items[0]["report_id"] == res["id"] and items[0]["kind"] == "mistake"
     assert client.get("/api/privacy").json()["privacy_note"]
     assert client.get("/api/options").json()["privacy_note"]
+
+
+def test_nearby_and_zip_lookup(monkeypatch):
+    from app import places
+
+    assert places.ready()
+    assert client.get("/api/zip/11218").json()["city"] == "Brooklyn"
+    assert client.get("/api/zip/00000").status_code == 422
+    # No network in tests: fake the registry, keep the hospital lookup real.
+    monkeypatch.setattr(places, "_npi_query", lambda postal_code, search: [{
+        "number": "1", "enumeration_type": "NPI-1",
+        "basic": {"first_name": "ANNA", "last_name": "LEE", "credential": "M.D."},
+        "addresses": [{"address_purpose": "LOCATION", "address_1": "1 MAIN ST", "city": "BROOKLYN", "state": "NY",
+                       "postal_code": "112181234", "telephone_number": "718-555-0100", "country_code": "US"}],
+        "taxonomies": [{"desc": "Orthopaedic Surgery", "primary": True}],
+    }] if "Ortho" in search else [])
+    r = client.post("/api/nearby", json={"zip": "11218", "specialist": "Orthopedic surgeon (orthopedics)", "urgency": "urgent"})
+    assert r.status_code == 200, r.text
+    data = r.json()
+    kinds = [g["kind"] for g in data["groups"]]
+    assert kinds[0] == "specialist" and "emergency" in kinds
+    er = next(g for g in data["groups"] if g["kind"] == "emergency")["places"]
+    assert er and er[0]["distance_miles"] < 5 and er[0]["directions_url"].startswith("https://www.google.com/maps/dir/")
+    spec = next(g for g in data["groups"] if g["kind"] == "specialist")["places"]
+    assert spec[0]["name"] == "Anna Lee, MD" and spec[0]["phone"] == "718-555-0100"
+    assert client.post("/api/nearby", json={"zip": "abc"}).status_code == 422
+
+
+def test_chat_mock_flow(monkeypatch):
+    from app import places
+
+    monkeypatch.setattr(places, "_npi_query", lambda postal_code, search: [])
+    r = client.post("/api/chat", json={"messages": [{"role": "user", "content": "I fell on my wrist yesterday, where should I go? I'm in 11218"}]})
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["reply"] and data["needs_image"] is True and data["suggested_body_part"] == "wrist_hand"
+    assert data["zip"] == "11218" and data["care"] and data["care"]["city"] == "Brooklyn"
+    assert data["ai_notice"] == "MedPeek is AI and can make mistakes."
+    r = client.post("/api/chat", json={"messages": [{"role": "user", "content": "where is the nearest hospital"}]})
+    assert "ZIP code" in r.json()["reply"] and r.json()["care"] is None
+    assert client.post("/api/chat", json={"messages": [{"role": "assistant", "content": "hi"}]}).status_code == 422

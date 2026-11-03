@@ -68,7 +68,13 @@ HEADERS = {'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest'}
 def start_analysis(file, body_part, modality, question):
     response = requests.post(api_url() + '/api/analyze', headers=HEADERS,
         files={'image': (file.filename, file.stream, file.mimetype)},
-        data={'body_part': body_part, 'modality': modality, 'question': question}, timeout=(10, 60))
+        data={'body_part': body_part or 'auto', 'modality': modality or 'xray', 'question': question}, timeout=(10, 60))
+    if response.status_code in (400, 413, 422, 429, 503):
+        try:
+            detail = response.json().get('detail')
+        except ValueError:
+            detail = None
+        raise ValueError(detail if isinstance(detail, str) else 'The backend could not accept this image.')
     response.raise_for_status()
     return response.json()
 
@@ -80,3 +86,40 @@ def poll_analysis(job_id):
         data['text'] = format_result(data['result'])
         # Preserve structured fields for the readable result card.
     return data
+
+
+def chat_turn(messages, zip_code='', report=None):
+    """Text-only turn with the MedPeek backend (symptoms, follow-ups, nearby care)."""
+    response = requests.post(api_url() + '/api/chat', headers=HEADERS, timeout=(10, 90),
+                             json={'messages': messages, 'zip': zip_code or '', 'report': report})
+    response.raise_for_status()
+    return response.json()
+
+
+def nearby_care(zip_code, specialist='', urgency='soon', limit=3, include=None):
+    """Nearest emergency rooms, urgent care and specialists for a ZIP code (backend care finder)."""
+    payload = {'zip': zip_code, 'specialist': specialist or '', 'urgency': urgency or 'soon', 'limit': limit}
+    if include:
+        payload['include'] = include
+    response = requests.post(api_url() + '/api/nearby', headers=HEADERS, timeout=(10, 40), json=payload)
+    if response.status_code == 422:
+        raise ValueError(response.json().get('detail', 'Please check the ZIP code.'))
+    response.raise_for_status()
+    return response.json()
+
+
+def zip_lookup(zip_code):
+    response = requests.get(api_url() + '/api/zip/' + str(zip_code)[:5], headers=HEADERS, timeout=(10, 20))
+    if response.status_code == 422:
+        raise ValueError(response.json().get('detail', 'Please check the ZIP code.'))
+    response.raise_for_status()
+    return response.json()
+
+
+def health():
+    try:
+        response = requests.get(api_url() + '/api/health', headers=HEADERS, timeout=(5, 10))
+        response.raise_for_status()
+        return response.json()
+    except (requests.RequestException, ValueError):
+        return None

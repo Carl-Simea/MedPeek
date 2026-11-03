@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Conversations · MedPeek{% endblock %}
+{% block body_class %}app{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" crossorigin="">
+{% endblock %}
+{% block content %}
+<div class="workspace">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-head">
+      <h2>Conversations</h2>
+      <button id="new-chat" type="button" class="btn primary small">+ New</button>
+    </div>
+    <p class="note">Saved to your MedPeek account.</p>
+    <nav id="history-list" class="history" aria-label="Chat history"></nav>
+    <div class="sidebar-foot">
+      <div class="zip-box">
+        <label for="zip-input">Your ZIP code</label>
+        <div class="row">
+          <input id="zip-input" inputmode="numeric" pattern="[0-9]*" maxlength="5" placeholder="e.g. 11218" autocomplete="postal-code">
+          <button id="zip-save" type="button" class="btn small">Find care</button>
+        </div>
+        <p id="zip-status" class="note">Used to find the closest ER, urgent care and specialists.</p>
+      </div>
+    </div>
+  </aside>
+
+  <main class="chat-main">
+    <div class="chat-head">
+      <button id="sidebar-toggle" type="button" class="btn icon" aria-label="Show conversations">☰</button>
+      <span class="eyebrow" id="chat-title">New conversation</span>
+      <span id="image-count" class="meta"></span>
+    </div>
+    {% if error_message %}<div class="notice" role="alert">{{ error_message }}</div>{% endif %}
+
+    <section id="chat-window" aria-label="Conversation">
+      <div id="welcome" class="welcome">
+        <div class="logo-halo"><img src="/static/logo.svg" alt=""></div>
+        <h1>What's going on?</h1>
+        <p>Describe your symptoms or a report you have, or attach an X-ray, MRI or CT scan. MedPeek explains it in plain words and tells you where to go next.</p>
+        <div class="starters">
+          <button type="button" data-prompt="I fell on my wrist yesterday and it's swollen. Is it broken?">Wrist after a fall</button>
+          <button type="button" data-prompt="My 6-year-old has had a cough and fever for three days. When should I worry?">Child with a cough</button>
+          <button type="button" data-prompt="I have a hard, painful lump above my knee. What could it be?">Lump above the knee</button>
+          <button type="button" data-prompt="Where is the nearest emergency room? My ZIP code is 11218.">ER near me</button>
+        </div>
+      </div>
+      <div id="messages" aria-live="polite"></div>
+    </section>
+
+    <form id="chat-form" class="composer-wrap" autocomplete="off">
+      <div id="attach-preview" class="attach-preview" hidden>
+        <img id="attach-thumb" alt="">
+        <div class="attach-meta">
+          <strong id="attach-name"></strong>
+          <div class="row wrap">
+            <label>Body area
+              <select name="body_part" id="body-part">
+                <option value="auto">Auto-detect</option>
+                {% for part in options.body_parts %}<option value="{{ part.id }}">{{ part.label }}</option>{% endfor %}
+              </select>
+            </label>
+            <label>Scan type
+              <select name="modality" id="modality">
+                {% for item in options.modalities %}<option value="{{ item.id }}">{{ item.label }}</option>{% endfor %}
+              </select>
+            </label>
+          </div>
+        </div>
+        <button type="button" id="attach-remove" class="btn icon" aria-label="Remove image">✕</button>
+      </div>
+      <div class="composer">
+        <input type="file" id="xray_upload" accept=".png,.jpg,.jpeg,.webp,.dcm,.dicom" hidden>
+        <button type="button" id="attach" class="btn icon accent" aria-label="Attach a scan" title="Attach an X-ray, MRI or CT image">＋</button>
+        <textarea name="user_message" id="user-message" maxlength="1000" placeholder="Message MedPeek…" rows="1" aria-label="Your message"></textarea>
+        <button id="send" type="submit" class="btn send" aria-label="Send">↑</button>
+      </div>
+      <p id="form-error" class="error" role="alert"></p>
+      <p class="privacy-line">{{ options.privacy_note or "Privacy: MedPeek doesn't save your images." }} · <strong>MedPeek is AI and can make mistakes.</strong></p>
+    </form>
+  </main>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" crossorigin=""></script>
+<script src="/static/chat.js?v=3"></script>
+{% endblock %}

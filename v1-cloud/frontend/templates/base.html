@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="csrf-token" content="{{ csrf_token() }}">
+<meta name="description" content="MedPeek explains X-rays, MRIs and CT scans in plain language, tells you which doctor to see and finds care near you.">
+<title>{% block title %}MedPeek{% endblock %}</title>
+<link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css?v=3">
+{% block head %}{% endblock %}
+<script>
+  try { if (localStorage.getItem('medpeek-theme') === 'dark') document.documentElement.classList.add('dark'); } catch (e) {}
+</script>
+</head>
+<body class="{% block body_class %}{% endblock %}">
+<header class="topbar">
+  <a class="brand" href="/" aria-label="MedPeek home">
+    <img src="/static/logo.svg" alt="">
+    <span>MedPeek<small>A little clarity. A little care.</small></span>
+  </a>
+  <nav class="topnav" aria-label="Main">
+    <a href="/#how" class="navlink">How it works</a>
+    <a href="/#trust" class="navlink">Data &amp; privacy</a>
+    {% if g.user %}
+      <a href="/chat" class="navlink">Conversations</a>
+    {% endif %}
+    <button id="report-open" type="button" class="btn ghost" title="Report a mistake, bug or issue">⚑ Report a problem</button>
+    <button id="theme-toggle" type="button" class="btn icon" aria-label="Switch color theme">◐</button>
+    {% if g.user %}
+      <span class="account">{{ g.user['username'] }}</span>
+      <form action="/logout" method="post" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" class="btn">Sign out</button></form>
+    {% else %}
+      <a href="/login" class="btn">Sign in</a>
+      <a href="/register" class="btn primary">Get started</a>
+    {% endif %}
+  </nav>
+</header>
+
+{% block content %}{% endblock %}
+
+<div id="report-modal" class="modal-wrap" hidden>
+  <form id="report-form" class="modal" role="dialog" aria-modal="true" aria-labelledby="report-title">
+    <h2 id="report-title">Report a mistake, bug or issue</h2>
+    <label for="report-kind">What happened?</label>
+    <select id="report-kind">
+      <option value="mistake">A report looks wrong</option>
+      <option value="bug">Something didn't work (bug)</option>
+      <option value="issue">Other issue or idea</option>
+    </select>
+    <label for="report-message">Tell us more</label>
+    <textarea id="report-message" required minlength="3" maxlength="2000" rows="4" placeholder="What did you expect, and what happened?"></textarea>
+    <label for="report-contact">Email (optional, if you want a reply)</label>
+    <input id="report-contact" type="email" maxlength="200" placeholder="you@example.com">
+    <p id="report-status" class="note" role="status"></p>
+    <div class="row end">
+      <button type="button" id="report-cancel" class="btn">Cancel</button>
+      <button type="submit" id="report-send" class="btn primary">Send report</button>
+    </div>
+  </form>
+</div>
+
+<footer class="site-footer">
+  <div>
+    <strong>MedPeek is AI and can make mistakes.</strong> It explains medical images and health questions; it does not diagnose. Your doctor and the radiologist's report have the final word. If this is an emergency, call 911.
+  </div>
+  <div class="meta">Gemma 4 · verified reference library · US care finder data from CMS, HIFLD, the NPI Registry and GeoNames · Map © OpenStreetMap contributors</div>
+</footer>
+<script src="/static/app.js?v=3"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

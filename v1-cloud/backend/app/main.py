@@ -21,17 +21,19 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 from fastapi.staticfiles import StaticFiles
 
-from . import gemma
-from .body_parts import BODY_PARTS, MODALITIES, body_part_from_text, normalize_body_part, normalize_modality
+from . import gemma, places
+from .body_parts import BODY_PARTS, MODALITIES, SPECIALISTS, body_part_from_text, normalize_body_part, normalize_modality
 from .config import settings
 from .imaging import ImageError, prepare_image, thumbnail_vector
 from .jobs import JobQueue
 from .pipeline import run_analysis
+from .prompts import CHAT_SCHEMA, CHAT_SYSTEM_PROMPT, report_context
 from .references import ReferenceLibrary
 from .report_pdf import build_pdf, verification_code
+from .safety import AI_NOTICE, EMERGENCY_NOTICE
 from .schemas import AnalysisResult, JobStatus, Options, ReferenceUsed
 
-VERSION = "1.1.0"
+VERSION = "2.0.0"
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("medpeek.api")
 
@@ -53,7 +55,7 @@ app.add_middleware(
 
 library = ReferenceLibrary(settings.reference_dir)
 jobs = JobQueue()
-_recent_requests: dict[str, deque] = defaultdict(deque)
+_recent_requests: dict[tuple, deque] = defaultdict(deque)
 
 
 @app.middleware("http")
@@ -78,16 +80,17 @@ def _client_ip(request: Request) -> str:
     return forwarded.split(",")[0].strip() or (request.client.host if request.client else "unknown")
 
 
-def _rate_limit(request: Request) -> None:
-    """At most ANALYZE_PER_MINUTE analyses per visitor per minute, and a cap on the waiting line."""
-    if settings.analyze_per_minute > 0:
-        now, window = time.monotonic(), _recent_requests[_client_ip(request)]
+def _rate_limit(request: Request, bucket: str = "analyze", per_minute: int | None = None, queue_check: bool = True) -> None:
+    """Per-visitor limits for a public URL: analyses per minute (and other endpoints), plus a cap on the waiting line."""
+    limit = settings.analyze_per_minute if per_minute is None else per_minute
+    if limit > 0:
+        now, window = time.monotonic(), _recent_requests[(bucket, _client_ip(request))]
         while window and now - window[0] > 60:
             window.popleft()
-        if len(window) >= settings.analyze_per_minute:
-            raise HTTPException(429, "Too many images in a minute. Please wait a moment and try again.")
+        if len(window) >= limit:
+            raise HTTPException(429, "Too many requests in a minute. Please wait a moment and try again.")
         window.append(now)
-    if settings.max_waiting_jobs > 0 and jobs.waiting() >= settings.max_waiting_jobs:
+    if queue_check and settings.max_waiting_jobs > 0 and jobs.waiting() >= settings.max_waiting_jobs:
         raise HTTPException(503, "MedPeek is busy right now. Please try again in a minute.")
 
 
@@ -178,6 +181,124 @@ def job_pdf(job_id: str) -> Response:
     if job is None or job["status"] != "done":
         raise HTTPException(404, "That report isn't available. Use POST /api/report/pdf with the result instead.")
     return _pdf_response(job["result"])
+
+
+# ---------------------------------------------------------------- care finder + chat
+class NearbyRequest(BaseModel):
+    zip: str = Field(..., min_length=5, max_length=10, description="US ZIP code")
+    specialist: str = Field("", description="A specialist name from a MedPeek report (optional)")
+    urgency: str = Field("soon", description="routine, soon, urgent or emergency")
+    limit: int = Field(3, ge=1, le=5)
+    include: list[str] = Field(default_factory=lambda: ["emergency", "urgent_care", "specialist"])
+
+
+@app.post("/api/nearby", tags=["care finder"])
+def nearby(req: NearbyRequest, request: Request) -> dict:
+    """Top 3 emergency rooms, urgent care centers and matching specialists near a US ZIP code, with map coordinates
+    and directions links. Free government data: CMS hospital list, HIFLD coordinates, NPI Registry, GeoNames."""
+    _rate_limit(request, bucket="nearby", per_minute=30, queue_check=False)
+    if not places.ready():
+        raise HTTPException(503, "The care finder data isn't built yet (run scripts/build_places.py).")
+    specialist = req.specialist if req.specialist in SPECIALISTS else ""
+    urgency = req.urgency if req.urgency in ("routine", "soon", "urgent", "emergency") else "soon"
+    try:
+        return places.find_care(req.zip, specialist, urgency, req.limit,
+                                include=tuple(i for i in req.include if i in ("emergency", "urgent_care", "specialist")))
+    except places.PlacesError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.get("/api/zip/{zip_code}", tags=["care finder"])
+def zip_info(zip_code: str) -> dict:
+    """City, state and coordinates for a US ZIP code (to confirm what the patient typed)."""
+    try:
+        return places.lookup_zip(zip_code)
+    except places.PlacesError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+class ChatMessage(BaseModel):
+    role: str = Field(..., pattern="^(user|assistant)$")
+    content: str = Field(..., max_length=4000)
+
+
+class ChatRequest(BaseModel):
+    messages: list[ChatMessage] = Field(..., min_length=1, max_length=30)
+    zip: str = Field("", max_length=10, description="The patient's ZIP code, if already known")
+    report: Optional[dict] = Field(None, description="The last MedPeek report in this chat, for follow-up questions")
+    find_care: bool = Field(True, description="Look up nearby care when the patient asks for it and a ZIP is known")
+
+
+def _chat_turn(req: ChatRequest) -> dict:
+    history = [{"role": m.role, "content": m.content.strip()} for m in req.messages[-12:] if m.content.strip()]
+    if not history or history[-1]["role"] != "user":
+        raise HTTPException(422, "The last message must be from the patient.")
+    context = report_context(req.report)
+    if context:
+        history[-1] = {"role": "user", "content": context + "\n\nPatient's message: " + history[-1]["content"]}
+    if settings.mock_gemma:
+        raw = {"reply": "This is a mock chat answer for frontend testing. A wrist that hurts after a fall should be "
+                        "checked for a fracture; attaching the X-ray lets me look at it.", "topic_ok": True,
+               "needs_image": True, "body_part": "wrist_hand", "specialist": "Orthopedic surgeon (orthopedics)",
+               "urgency": "soon", "emergency": False,
+               "wants_nearby_care": any(w in history[-1]["content"].lower() for w in ("near", "nearby", "where", "hospital")),
+               "zip_code": places.find_zip_in_text(history[-1]["content"]) or ""}
+        info = {"engine": "mock", "model": settings.gemma_model, "seconds": 0.0}
+    else:
+        try:
+            raw, info = gemma.converse(CHAT_SYSTEM_PROMPT, history, CHAT_SCHEMA, max_tokens=1024)
+        except gemma.GemmaUnavailable as exc:
+            raise HTTPException(503, str(exc)) from exc
+        except gemma.GemmaBadOutput as exc:
+            raise HTTPException(502, str(exc)) from exc
+
+    last_user = req.messages[-1].content
+    zip_code = places.find_zip_in_text(last_user) or places.find_zip_in_text(str(raw.get("zip_code", ""))) \
+        or places.find_zip_in_text(req.zip)
+    specialist = raw.get("specialist") if raw.get("specialist") in SPECIALISTS else ""
+    urgency = raw.get("urgency") if raw.get("urgency") in ("routine", "soon", "urgent", "emergency") else "routine"
+    emergency = bool(raw.get("emergency")) or urgency == "emergency"
+    if emergency:
+        urgency, specialist = "emergency", "Emergency department"
+    body_part = normalize_body_part(str(raw.get("body_part") or "")) if raw.get("body_part") else None
+    wants_care = bool(raw.get("wants_nearby_care")) or emergency
+    reply = " ".join(str(raw.get("reply") or "").split())
+
+    care, care_error = None, None
+    if req.find_care and wants_care and zip_code and places.ready():
+        try:
+            include = ("emergency",) if emergency else ("specialist", "urgent_care", "emergency")
+            care = places.find_care(zip_code, specialist, urgency, 3, include=include)
+        except places.PlacesError as exc:
+            care_error = str(exc)
+    elif wants_care and not zip_code and "zip" not in reply.lower():
+        reply += " If you tell me your ZIP code, I'll list the closest places that can help."
+
+    return {
+        "reply": reply,
+        "topic_ok": bool(raw.get("topic_ok", True)),
+        "needs_image": bool(raw.get("needs_image")),
+        "suggested_body_part": body_part,
+        "suggested_body_part_label": BODY_PARTS[body_part]["label"] if body_part else "",
+        "specialist": specialist,
+        "urgency": urgency,
+        "urgency_notice": EMERGENCY_NOTICE if emergency else None,
+        "zip": zip_code or "",
+        "care": care,
+        "care_error": care_error,
+        "ai_notice": AI_NOTICE,
+        "engine": info.get("engine", ""),
+        "model": info.get("model", ""),
+        "processing_seconds": info.get("seconds", 0.0),
+    }
+
+
+@app.post("/api/chat", tags=["chat"])
+def chat(req: ChatRequest, request: Request) -> dict:
+    """Talk to MedPeek without an image: symptoms, what a report means, which doctor to see, nearby care.
+    Send the conversation so far (last message from the patient). Health topics only."""
+    _rate_limit(request, bucket="chat", per_minute=20, queue_check=False)
+    return _chat_turn(req)
 
 
 class Feedback(BaseModel):

@@ -71,19 +71,29 @@ def privacy_note() -> str:
 
 def analyze(user_prompt: str, images_b64: list[str]) -> tuple[dict, dict]:
     """Send the prompt + images to Gemma 4. Returns (parsed_json, info about the run)."""
+    messages = [{"role": "user", "content": user_prompt, "images": images_b64}]
+    return converse(SYSTEM_PROMPT, messages, OUTPUT_SCHEMA)
+
+
+def converse(system_prompt: str, messages: list[dict], schema: dict, max_tokens: int = 2048) -> tuple[dict, dict]:
+    """Run a conversation (text, optionally with images on the last user turn) and get JSON back.
+
+    messages: [{"role": "user"|"assistant", "content": str, "images": [b64 png, ...]?}, ...]
+    Tries the hosted Gemma 4 models first (when a key is set), then the local copy.
+    """
     if engine() == "google":
         models = [m for m in dict.fromkeys([settings.google_model, settings.google_backup_model]) if m]
         last_error: Exception | None = None
         for model in models:
             try:
-                return _google(user_prompt, images_b64, model)
+                return _google(system_prompt, messages, schema, model, max_tokens)
             except (GemmaUnavailable, GemmaBadOutput) as exc:
                 last_error = exc
                 log.warning("Hosted Gemma 4 (%s) failed: %s", model, exc)
         if not settings.fallback_to_local and last_error:
             raise last_error
         log.warning("All hosted Gemma 4 models failed. Falling back to the local copy.")
-    return _ollama(user_prompt, images_b64)
+    return _ollama(system_prompt, messages, schema)
 
 
 def _parse_json(text: str) -> dict:
@@ -101,20 +111,22 @@ def _parse_json(text: str) -> dict:
     return parsed
 
 
-def _google(user_prompt: str, images_b64: list[str], model: str) -> tuple[dict, dict]:
+def _google(system_prompt: str, messages: list[dict], schema: dict, model: str, max_tokens: int) -> tuple[dict, dict]:
     if not settings.google_api_key:
         raise GemmaUnavailable("No Google AI Studio API key is set (GEMINI_API_KEY).")
-    schema = json.dumps(OUTPUT_SCHEMA, separators=(",", ":"))
-    parts: list[dict] = [{"inline_data": {"mime_type": "image/png", "data": b64}} for b64 in images_b64]
-    parts.append(
-        {
-            "text": f"{user_prompt}\n\nReply with ONLY one JSON object, no markdown, that matches this JSON schema:\n{schema}"
-        }
-    )
+    schema_text = json.dumps(schema, separators=(",", ":"))
+    contents = []
+    for i, m in enumerate(messages):
+        parts: list[dict] = [{"inline_data": {"mime_type": "image/png", "data": b64}} for b64 in (m.get("images") or [])]
+        text = m.get("content") or ""
+        if i == len(messages) - 1:
+            text += f"\n\nReply with ONLY one JSON object, no markdown, that matches this JSON schema:\n{schema_text}"
+        parts.append({"text": text})
+        contents.append({"role": "model" if m.get("role") == "assistant" else "user", "parts": parts})
     body: dict = {
-        "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
-        "contents": [{"role": "user", "parts": parts}],
-        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 2048, "thinkingConfig": {"thinkingLevel": "minimal"}},
+        "systemInstruction": {"parts": [{"text": system_prompt}]},
+        "contents": contents,
+        "generationConfig": {"temperature": 0.3, "maxOutputTokens": max_tokens, "thinkingConfig": {"thinkingLevel": "minimal"}},
     }
     url = GOOGLE_URL.format(model=model)
     headers = {"x-goog-api-key": settings.google_api_key}
@@ -156,22 +168,25 @@ def _post(url: str, body: dict, headers: dict) -> httpx.Response:
         raise GemmaUnavailable(f"Couldn't reach Google AI Studio: {exc}") from exc
 
 
-def _ollama(user_prompt: str, images_b64: list[str]) -> tuple[dict, dict]:
+def _ollama(system_prompt: str, messages: list[dict], schema: dict) -> tuple[dict, dict]:
+    chat = [{"role": "system", "content": system_prompt}]
+    for m in messages:
+        entry = {"role": "assistant" if m.get("role") == "assistant" else "user", "content": m.get("content") or ""}
+        if m.get("images"):
+            entry["images"] = m["images"]
+        chat.append(entry)
     payload = {
         "model": settings.gemma_model,
         "stream": False,
         "think": settings.think,
-        "format": OUTPUT_SCHEMA,
+        "format": schema,
         "keep_alive": -1,
         "options": {
             "temperature": 0.2,
             "num_ctx": settings.num_ctx,
             **({"num_thread": settings.num_thread} if settings.num_thread > 0 else {}),
         },
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt, "images": images_b64},
-        ],
+        "messages": chat,
     }
     started = time.monotonic()
     try:
