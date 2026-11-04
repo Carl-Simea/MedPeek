@@ -210,7 +210,7 @@
   function drawMap(mapEl, care, pins) {
     if (!window.L || !mapEl.isConnected) return;
     const map = L.map(mapEl, { scrollWheelZoom: false }).setView([care.lat, care.lon], 12);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '© OpenStreetMap contributors' }).addTo(map);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, referrerPolicy: 'strict-origin-when-cross-origin', attribution: '© OpenStreetMap contributors' }).addTo(map);
     const you = L.circleMarker([care.lat, care.lon], { radius: 8, color: '#137c70', fillColor: '#137c70', fillOpacity: .9 }).addTo(map).bindPopup('Your ZIP code ' + care.zip);
     const bounds = [[care.lat, care.lon]];
     const colors = { emergency: '#e5484d', urgent_care: '#d98c1f', specialist: '#137c70' };
