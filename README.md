@@ -19,17 +19,19 @@
 | Where Gemma 4 runs | A FastAPI backend in a Codespace or on Google AI Studio | On your own computer through Ollama |
 | Body parts | Every body part, from skull to foot | Hands, including children's hands |
 | Image types | X-ray, MRI and CT scan | X-ray |
-| Filters | Choose the body part and image type when you upload | None needed (hands only) |
-| Interface | Upload form plus results page | Chat with history and an ocean-teal theme |
+| Filters | None needed: chat first, attach a scan when you have one, MedPeek finds the body part | None needed (hands only) |
+| Care finder | Top 3 nearby emergency rooms, urgent care and specialists from a ZIP code, on a map | – |
+| Interface | Chat with conversations, PDF reports, light and dark themes | Chat with history and an ocean-teal theme |
 | Folder | [`v1-cloud/`](v1-cloud/) | [`v2-local/`](v2-local/) |
 
 ### v1-cloud: the team build
 Because Gemma 4 runs in the cloud, this version has room for a large reference library covering the whole body.
 
-- **Filter options when you upload:** pick the **body part** (skull and face, teeth and jaw, neck, chest for adults or children, breast, back, abdomen and kidneys, pelvis and hip, shoulder, elbow and forearm, wrist and hand, thigh and knee, lower leg and foot, or whole body) and the **image type** (X-ray, MRI or CT scan).
+- **Chat first.** Describe what's going on in plain words. Gemma 4 answers health questions, asks for the scan when it would help, and works out the **body part** (skull and face, teeth and jaw, neck, chest for adults or children, breast, back, abdomen and kidneys, pelvis and hip, shoulder, elbow and forearm, wrist and hand, thigh and knee, lower leg and foot) and the **image type** (X-ray, MRI or CT scan) itself.
 - A FastAPI backend (`v1-cloud/backend`) cleans each upload, removes names and other personal details, finds similar verified reference cases for that body part and asks Gemma 4 to explain the image.
 - Safety rules on the server make sure every answer names the kind of doctor to see, and emergencies point to the emergency room.
-- A Flask frontend (`v1-cloud/frontend`) handles accounts and conversations.
+- **Care near you:** add a ZIP code and MedPeek lists the three closest emergency rooms, urgent care centers and the right specialists on a map, with phone numbers and directions. Free public data only (CMS, HIFLD, NPI Registry, GeoNames, OpenStreetMap).
+- A Flask frontend (`v1-cloud/frontend`) handles accounts, conversations and PDF reports.
 
 See [`v1-cloud/README.md`](v1-cloud/README.md).
 

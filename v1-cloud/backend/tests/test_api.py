@@ -252,6 +252,29 @@ def test_auto_body_part_from_question_and_image():
     assert res["body_part_detected_by"] == "image" and res["body_part"]
 
 
+def test_gemma_identifies_body_part_and_scan_type(monkeypatch):
+    from app import gemma, pipeline
+    from app import main as main_module
+
+    main_module._recent_requests.clear()  # this test makes several analyses in a row (8/minute limit)
+    monkeypatch.setattr(pipeline.settings, "mock_gemma", False)
+    monkeypatch.setattr(gemma, "identify", lambda b64: {"is_medical_image": True, "modality": "mri",
+                                                        "body_part": "thigh_knee", "confidence": "high"})
+    monkeypatch.setattr(gemma, "analyze", lambda prompt, images: gemma.mock_answer("thigh_knee", "mri"))
+    res = client.post("/api/analyze?wait=true", files={"image": ("x.png", png_bytes(), "image/png")},
+                      data={"modality": "auto"}).json()
+    assert (res["body_part"], res["modality"], res["body_part_detected_by"]) == ("thigh_knee", "mri", "image")
+    # a body part named in the question still wins, and the scan type is taken from the image
+    res = client.post("/api/analyze?wait=true", files={"image": ("x.png", png_bytes(), "image/png")},
+                      data={"modality": "auto", "question": "my wrist hurts"}).json()
+    assert (res["body_part"], res["modality"], res["body_part_detected_by"]) == ("wrist_hand", "mri", "question")
+    # without the hosted engine: similar-case vote for the body part, X-ray as the default scan type
+    monkeypatch.setattr(gemma, "identify", lambda b64: None)
+    res = client.post("/api/analyze?wait=true", files={"image": ("x.png", png_bytes(), "image/png")},
+                      data={"modality": "auto"}).json()
+    assert res["modality"] == "xray" and res["body_part_detected_by"] == "image"
+
+
 def test_rate_limit_and_health(monkeypatch):
     from app.config import settings
 
@@ -381,3 +404,22 @@ def test_chat_mock_flow(monkeypatch):
     r = client.post("/api/chat", json={"messages": [{"role": "user", "content": "where is the nearest hospital"}]})
     assert "ZIP code" in r.json()["reply"] and r.json()["care"] is None
     assert client.post("/api/chat", json={"messages": [{"role": "assistant", "content": "hi"}]}).status_code == 422
+
+
+def test_hosted_gemma_retries_once_when_busy(monkeypatch):
+    from app import gemma
+
+    class Resp:
+        def __init__(self, code, payload=None):
+            self.status_code, self._payload, self.text = code, payload or {}, "busy"
+
+        def json(self):
+            return self._payload
+
+    ok = {"candidates": [{"content": {"parts": [{"text": '{"answer": "fine"}'}]}}]}
+    calls = []
+    monkeypatch.setattr(gemma.settings, "google_api_key", "test-key")
+    monkeypatch.setattr(gemma.time, "sleep", lambda s: None)
+    monkeypatch.setattr(gemma, "_post", lambda url, body, headers: calls.append(1) or (Resp(503) if len(calls) == 1 else Resp(200, ok)))
+    parsed, info = gemma._google("sys", [{"role": "user", "content": "hi"}], {"type": "object"}, "gemma-test", 64)
+    assert parsed == {"answer": "fine"} and len(calls) == 2 and info["engine"] == "google"

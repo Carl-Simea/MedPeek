@@ -62,6 +62,7 @@
             </label>
             <label>Scan type
               <select name="modality" id="modality">
+                <option value="auto">Auto-detect</option>
                 {% for item in options.modalities %}<option value="{{ item.id }}">{{ item.label }}</option>{% endfor %}
               </select>
             </label>

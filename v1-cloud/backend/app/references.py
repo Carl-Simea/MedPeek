@@ -191,7 +191,7 @@ class ReferenceLibrary:
         if label not in LABELS:
             label = "unknown"
         prepared = prepare_image(image_bytes, filename, max_side=max_side)
-        slug = re.sub(r"[^a-z0-9]+", "-", Path(filename).stem.lower()).strip("-")[:40] or "case"
+        slug = re.sub(r"[^a-z0-9]+", "-", Path(filename).stem.lower()).strip("-")[:64] or "case"
         case_id = f"{slug}-{uuid.uuid4().hex[:6]}"
         folder = self.root / body_part / modality / case_id
         folder.mkdir(parents=True, exist_ok=True)

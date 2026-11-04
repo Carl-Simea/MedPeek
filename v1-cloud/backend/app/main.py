@@ -24,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from . import gemma, places
 from .body_parts import BODY_PARTS, MODALITIES, SPECIALISTS, body_part_from_text, normalize_body_part, normalize_modality
 from .config import settings
-from .imaging import ImageError, prepare_image, thumbnail_vector
+from .imaging import ImageError, prepare_image
 from .jobs import JobQueue
 from .pipeline import run_analysis
 from .prompts import CHAT_SCHEMA, CHAT_SYSTEM_PROMPT, report_context
@@ -106,6 +106,11 @@ async def _read_upload(upload: UploadFile) -> bytes:
 
 
 def _check_choices(body_part: str, modality: str) -> tuple[str, str]:
+    if (modality or "").strip().lower() == "auto":
+        bp = "auto" if (body_part or "").strip().lower() in ("", "auto") else normalize_body_part(body_part)
+        if bp is None:
+            raise HTTPException(422, f"Unknown body_part '{body_part}'. Use one of: {', '.join(BODY_PARTS)}.")
+        return bp, "auto"
     if (body_part or "").strip().lower() in ("", "auto"):
         bp = "auto"
         mod = normalize_modality(modality)
@@ -354,13 +359,14 @@ async def analyze(
     request: Request,
     image: UploadFile = File(..., description="X-ray/MRI/CT image: JPG, PNG, WEBP or DICOM (.dcm)"),
     body_part: str = Form("auto", description="An id from /api/options (e.g. wrist_hand), plain words (knee), or auto"),
-    modality: str = Form("xray", description="xray, mri or ct"),
+    modality: str = Form("xray", description="xray, mri, ct or auto"),
     question: str = Form("", description="Optional question from the patient"),
     wait: bool = Query(False, description="true = wait for the result instead of getting a job id"),
 ):
     """Start an analysis. Returns a job id to poll at /api/jobs/{job_id} (or the result if wait=true).
 
-    body_part=auto: MedPeek uses the body part named in the question, or else the most similar verified images.
+    body_part=auto: MedPeek uses the body part named in the question; otherwise hosted Gemma 4 looks at the image
+    (or, with only the local engine, the most similar verified images decide). modality=auto works the same way.
     """
     bp, mod = _check_choices(body_part, modality)
     _rate_limit(request)
@@ -374,12 +380,8 @@ async def analyze(
 
     q = (question or "").strip()[:500]
     detected_by = "user"
-    if bp == "auto":
-        bp, detected_by = body_part_from_text(q), "question"
-        if bp is None:
-            bp, detected_by = library.guess_body_part(mod, thumbnail_vector(prepared.png_bytes)), "image"
-        if bp is None:
-            bp, detected_by = "whole_body", "image"
+    if bp == "auto":  # a body part named in the question wins; otherwise the job looks at the image
+        bp, detected_by = (body_part_from_text(q) or "auto"), "question"
     job_id = jobs.submit(
         lambda: run_analysis(
             image=prepared, body_part=bp, modality=mod, question=q, library=library, detected_by=detected_by

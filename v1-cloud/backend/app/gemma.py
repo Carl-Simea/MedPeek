@@ -75,6 +75,49 @@ def analyze(user_prompt: str, images_b64: list[str]) -> tuple[dict, dict]:
     return converse(SYSTEM_PROMPT, messages, OUTPUT_SCHEMA)
 
 
+IDENTIFY_PROMPT = """You sort medical images for a patient app before a specialist model reads them.
+Say which body area the image shows and what kind of image it is. Pick the closest body area from this list
+(id: meaning):
+{parts}
+If the image is not a medical scan, set is_medical_image to false. Reply with JSON only."""
+
+
+def identify(image_b64: str) -> dict | None:
+    """Ask hosted Gemma 4 which body area and imaging type an image shows (a few seconds).
+
+    Returns {"body_part", "modality", "is_medical_image", "confidence"} or None. Never uses the slow local
+    copy: when only the local engine is available, MedPeek falls back to comparing with similar cases.
+    """
+    if engine() != "google":
+        return None
+    from .body_parts import BODY_PARTS  # local import: body_parts does not depend on this module
+
+    parts = "\n".join(f"- {key}: {info['label']}" for key, info in BODY_PARTS.items())
+    schema = {
+        "type": "object",
+        "properties": {
+            "is_medical_image": {"type": "boolean"},
+            "modality": {"type": "string", "enum": ["xray", "mri", "ct", "other"]},
+            "body_part": {"type": "string", "enum": list(BODY_PARTS)},
+            "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+        },
+        "required": ["is_medical_image", "modality", "body_part", "confidence"],
+    }
+    messages = [{"role": "user", "content": "Which body area and image type is this?", "images": [image_b64]}]
+    for model in dict.fromkeys([settings.google_model, settings.google_backup_model]):
+        if not model:
+            continue
+        try:
+            parsed, info = _google(IDENTIFY_PROMPT.format(parts=parts), messages, schema, model, 256)
+        except (GemmaUnavailable, GemmaBadOutput) as exc:
+            log.warning("Image identification with %s failed: %s", model, exc)
+            continue
+        if parsed.get("body_part") in BODY_PARTS:
+            parsed["seconds"] = info.get("seconds")
+            return parsed
+    return None
+
+
 def converse(system_prompt: str, messages: list[dict], schema: dict, max_tokens: int = 2048) -> tuple[dict, dict]:
     """Run a conversation (text, optionally with images on the last user turn) and get JSON back.
 
@@ -133,6 +176,10 @@ def _google(system_prompt: str, messages: list[dict], schema: dict, model: str, 
 
     started = time.monotonic()
     r = _post(url, body, headers)
+    if r.status_code in (429, 500, 503) and time.monotonic() - started < 15:
+        log.warning("Google AI Studio is busy (%s); retrying %s once in 2 seconds.", r.status_code, model)
+        time.sleep(2)
+        r = _post(url, body, headers)
     if r.status_code == 400:
         log.warning("Google AI Studio said 400 (%s); retrying without the thinking setting.", r.text[:200])
         body["generationConfig"].pop("thinkingConfig", None)  # some model versions don't accept this field

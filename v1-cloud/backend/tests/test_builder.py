@@ -12,8 +12,31 @@ sys.modules[_spec.name] = b  # dataclasses need the module registered
 _spec.loader.exec_module(b)
 
 
-def test_size_limit_is_1gb():
-    assert b.MAX_SOURCE_BYTES == 1_000_000_000
+def test_size_limit_defaults_to_25gb():
+    assert b.MAX_SOURCE_BYTES == 25_000_000_000  # MAX_SOURCE_GB env overrides it
+
+
+def test_every_expansion_source_is_registered():
+    for name in ("nih_chest", "kermany", "grazpedwri", "dentex", "kub_stonex", "knee_oa", "mura", "brain_tumor", "csxa", "spider"):
+        assert name in b.LOADERS and name in b.SOURCES_INFO
+    for key in b.FILES.values():
+        assert key.startswith("https://")
+
+
+def test_ct_mri_captions_get_a_diagnosis():
+    assert b.roco_ct_mri_diagnosis("skull_face_sinuses", "Axial CT showing an acute subdural hematoma with midline shift") == \
+        ("abnormal", "bleeding in the brain (hemorrhage)")
+    assert b.roco_ct_mri_diagnosis("back_spine", "Sagittal T2 MRI: herniated disc at L4-L5") == ("abnormal", "herniated (slipped) disc")
+    assert b.roco_ct_mri_diagnosis("thigh_knee", "MRI of the knee: normal menisci and ligaments") == ("normal", "")
+    assert b.roco_ct_mri_diagnosis("shoulder_upper_arm", "CT showing pneumonia in the right lower lobe") is None
+
+
+def test_case_file_names_are_unique_per_source():
+    from pathlib import PurePosixPath
+
+    name = b.unique_name("mura", PurePosixPath("MURA-v1.1/train/XR_ELBOW/patient00011/study1_positive/image1.png"))
+    assert name == "mura-patient00011-study1-positive-image1.png"
+    assert b.case_slug(name) != b.case_slug("image1.png")
 
 
 def test_negated_findings_are_ignored():
@@ -34,3 +57,13 @@ def test_rocov2_conditions_fit_the_body_part():
     assert b.roco_diagnosis("thigh_knee", "Knee X-ray showing a joint effusion") == ("abnormal", "joint effusion (fluid in the joint)")
     assert b.roco_diagnosis("shoulder_upper_arm", "Pneumonia in the right lung") is None
     assert b.roco_diagnosis("wrist_hand", "Normal wrist radiograph") == ("normal", "")
+
+
+def test_ct_mri_body_part_comes_from_radiology_words():
+    assert b.roco_ct_mri_body_part("CT showing a mass in the head of the pancreas") == "abdomen_kidneys"
+    assert b.roco_ct_mri_body_part("Pelvic MRI showing cervical cancer invading the uterus") == "pelvis_hip"
+    assert b.roco_ct_mri_body_part("Sagittal T2 MRI of the cervical spine: C5-C6 disc herniation") == "neck_cervical_spine"
+    assert b.roco_ct_mri_body_part("Head CT: acute hemorrhage in the left frontal lobe") == "skull_face_sinuses"
+    assert b.roco_ct_mri_body_part("MRI of the left hip with degenerative changes") == "pelvis_hip"
+    assert b.roco_ct_mri_body_part("CT chest of a 6-year-old boy showing consolidation") == "chest_child"
+    assert b.roco_ct_mri_body_part("Figure 2, image of the lesion") is None
